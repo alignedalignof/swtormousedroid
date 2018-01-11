@@ -557,12 +557,15 @@ int main(int argn, char* argv[]) {
 		GetModuleFileName(0, exe, sizeof(exe));
 		SHELLEXECUTEINFO sei;
 		sei.cbSize = sizeof(sei);
+		sei.fMask = SEE_MASK_DEFAULT | SEE_MASK_NOASYNC;
+		sei.hwnd = 0;
 		sei.lpVerb = "runas";
 		sei.lpFile = exe;
-		sei.hwnd = 0;
-		sei.nShow = SW_NORMAL;
 		sei.lpParameters = cmd;
-		ShellExecuteEx(&sei);
+		sei.lpDirectory = 0;
+		sei.nShow = SW_NORMAL;
+		sei.hInstApp = 0;
+		ShellExecuteExA(&sei);
 		return 0;
 	}
 	FILE* readme = fopen("README.MD", "r");
