@@ -8,5 +8,6 @@
 #define SMD_MSG_CLICK			0x12346
 #define SMD_MSG_PRESS			0x12347
 #define SMD_MSG_DBG				0x12348
+#define SMD_MSG_TOGGLE			0x12349
 
 #endif /* SRC_SMD_MSG_H_ */

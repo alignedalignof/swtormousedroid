@@ -115,18 +115,7 @@ static void smd_toggle() {
 		smd_set_state(SMD_DEACTIVATING);
 		break;
 	}
-	INPUT mouse = {
-		.type = INPUT_MOUSE,
-		.mi = {
-			.dx = 0,
-			.dy = 0,
-			.mouseData = 0,
-			.dwFlags = flags,
-			.time = 0,
-			.dwExtraInfo = 0,
-		},
-	};
-	SendInput(1, &mouse, sizeof(mouse));
+	PostThreadMessageA(smd.thread.emu, WM_USER, SMD_MSG_TOGGLE, flags);
 }
 static void smd_press_btn(int btn) {
 	PostThreadMessageA(smd.thread.emu, WM_USER, SMD_MSG_PRESS, btn);
@@ -476,6 +465,21 @@ static void smd_emu() {
 		case SMD_MSG_INIT:
 			PlaySound("gen2.wav", NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 			break;
+		case SMD_MSG_TOGGLE: {
+			INPUT mouse = {
+				.type = INPUT_MOUSE,
+				.mi = {
+					.dx = 0,
+					.dy = 0,
+					.mouseData = 0,
+					.dwFlags = msg.lParam,
+					.time = 0,
+					.dwExtraInfo = 0,
+				},
+			};
+			SendInput(1, &mouse, sizeof(mouse));
+			break;
+		}
 		}
 	}
 }
