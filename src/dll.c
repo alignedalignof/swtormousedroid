@@ -5,46 +5,54 @@
 #include <windowsx.h>
 #include <Psapi.h>
 
-#include "minhook-master/include/MinHook.h"
-
+#include "log.h"
 #include "d3d.h"
-#include "smd_msg.h"
+#include "smd.h"
 
-static int no_debug(const char* format, ...) { return 0; }
-static int (*DBG)(const char* format, ...) = no_debug;
+#define VK0			0x30
+#define VK9			0x39
 
+static bool smd_should_log_key(uint8_t vk) {
+	if (vk >= VK0 && vk <= VK9)
+		return true;
+	if (vk >= VK_NUMPAD1 && vk <= VK_NUMPAD4)
+		return true;
+	if (vk == VK_OEM_MINUS || vk == VK_OEM_PLUS)
+		return true;
+	return false;
+}
 LRESULT CALLBACK GetMsgProc(int code, WPARAM wParam, LPARAM lParam) {
 	MSG msg;
 	memcpy(&msg, (void*)lParam, sizeof(msg));
-	if (msg.message == WM_USER) {
-		switch (msg.wParam) {
-		case SMD_MSG_INIT:
-			MH_Initialize();
-			d3d_hook();
-			PostThreadMessageA(msg.lParam, WM_USER, SMD_MSG_INIT, 0);
-			break;
-		case SMD_MSG_DBG:
-			AllocConsole();
-			freopen("CONOUT$", "w", stdout);
-			DBG = printf;
-			break;
-		case SMD_MSG_DEINIT:
-			MH_Uninitialize();
-			if (DBG == no_debug)
-				break;
-			fclose(stdout);
-			FreeConsole();
-			break;
-		case SMD_MSG_CROSS:
-			d3d_cross((int16_t)msg.lParam, (int16_t)(msg.lParam >> 16));
-			break;
-		case SMD_MSG_NO_CROSS:
-			d3d_nocross();
-			break;
-		}
+	switch (msg.message) {
+	case SMD_MSG_INIT:
+		log_line("D3D init");
+		PostThreadMessageA(msg.wParam, SMD_MSG_INIT, d3d_init(msg.wParam, (HANDLE)msg.lParam), 0);
+		break;
+	case SMD_MSG_LOG:
+		log_init(&msg.lParam);
+		log_designate_thread("swtor");
+		break;
+	case SMD_MSG_DEINIT:
+		d3d_deinit();
+		log_line("Deinit");
+		log_deinit();
+		break;
+	case SMD_MSG_CROSS:
+		d3d_cross((int16_t)msg.lParam, (int16_t)(msg.lParam >> 16));
+		break;
+	case SMD_MSG_NO_CROSS:
+		d3d_nocross();
+		break;
+	case SMD_MSG_FLASH_LOOT:
+		d3d_flash_loot();
+		break;
+	case WM_KEYUP:
+	case WM_SYSCHAR:
+		if (smd_should_log_key(msg.wParam))
+			log_line("Got virtual key: 0x%x", msg.wParam);
+		break;
 	}
-	if (msg.message == WM_KEYDOWN)
-		DBG("received virtual key code: 0x%x\n", msg.wParam);
 	return CallNextHookEx(0, code, wParam, lParam);
 }
 
