@@ -6,93 +6,130 @@
 #include <stdatomic.h>
 
 #include <windows.h>
-#include <Psapi.h>
 
 #include "getopt/getopt.h"
-#include "uiscan/uiscan.h"
+#include "gui.h"
 #include "log.h"
 #include "smd.h"
 
 #define APP_DEFAULT_DELAY_MS				200
 #define APP_DEFAULT_X_OFS					50
 #define APP_DEFAULT_Y_OFS					45
-#define APP_SEARCH_SWTOR					"Waiting for SWTOR..."
-enum {
-	APP_WAIT,
-	APP_RUN,
-};
+#define APP_LOG_INI							0
+#define APP_LOG_RUN							1
+#define APP_LOG_DIE							2
+#define APP_LOG_DED							3
+
 struct {
 	struct {
 		struct {
-			HANDLE app;
-			HANDLE sink;
+			HANDLE rd;
+			HANDLE wr;
 		} pipe;
 		HANDLE file;
-		int console;
 		int append;
-		atomic_bool run;
+		atomic_int run;
 	} log;
-	int elevated;
 	smd_cfg_t smd;
-	atomic_bool run;
-	atomic_bool done;
 } static app = {
 	.smd = {
 		.delay = APP_DEFAULT_DELAY_MS,
 		.x = APP_DEFAULT_X_OFS,
 		.y = APP_DEFAULT_Y_OFS,
-		.scan = true,
-	},
-	.log = {
-		.console = 1,
 	},
 };
+
 ////////////////////////////////////////////////////////////////////////////////
+
 static DWORD WINAPI app_logging_run(LPVOID arg) {
+	while (atomic_load(&app.log.run) == APP_LOG_INI)
+		Sleep(0);
+	log_designate_thread("log");
+
+	app.log.file = CreateFileA(SMD_FOLDER"log.txt", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, app.log.append ? OPEN_EXISTING : CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	if (INVALID_HANDLE_VALUE == app.log.file)
+		log_line("Opening log file failed");
+	else if (app.log.append)
+		SetFilePointer(app.log.file, 0 , NULL, FILE_END);
+
 	uint8_t str[1024];
 	DWORD len;
-	while (atomic_load(&app.log.run)) {
-		if (!ReadFile(app.log.pipe.sink, str, sizeof(str), &len, 0))
+	DWORD dum;
+	while (atomic_load(&app.log.run) != APP_LOG_DIE) {
+		if (!ReadFile(app.log.pipe.rd, str, sizeof(str), &len, 0))
 			if (GetLastError() != ERROR_MORE_DATA)
 				break;
-		WriteFile(app.log.file, str, len, 0, 0);
-		if (!app.log.console)
-			continue;
-		char* ofs = str;
-		while (len) {
-			putchar(*ofs++);
-			--len;
-		}
+		if (app.log.file != INVALID_HANDLE_VALUE)
+			WriteFile(app.log.file, str, len, &dum, 0);
+		for (int i = 0; i < len; ++i)
+			putchar(str[i]);
 	}
+	if (app.log.file != INVALID_HANDLE_VALUE)
+		WriteFile(app.log.file, ".\n", 2, &dum, 0);
+	printf(".\n");
+	atomic_store(&app.log.run, APP_LOG_DED);
 	return 0;
 }
-static int app_logging_init() {
-	app.log.file = CreateFileA("log.txt", GENERIC_WRITE, FILE_SHARE_READ, 0, app.log.append ? OPEN_EXISTING : CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-	if (!app.log.file)
-		return -1;
-	if (app.log.append)
-		SetFilePointer(app.log.file, 0 , NULL, FILE_END);
-	CreatePipe(&app.log.pipe.sink, &app.log.pipe.app, 0, 8192);
-	atomic_store(&app.log.run, true);
-	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)app_logging_run, 0, 0, 0);
-	app.smd.log = app.log.pipe.app;
-	return 0;
+
+static void app_logging_init() {
+	app.smd.epoch = GetTickCount();
+	ShowWindow(GetConsoleWindow(), SW_HIDE);
+	atomic_store(&app.log.run, APP_LOG_INI);
+
+	app.log.pipe.rd = INVALID_HANDLE_VALUE;
+	app.log.pipe.wr = INVALID_HANDLE_VALUE;
+	if (CreatePipe(&app.log.pipe.rd, &app.log.pipe.wr, 0, 8192) &&
+		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)app_logging_run, 0, 0, 0)) {
+		log_init(&app.log.pipe.wr, app.smd.epoch);
+		atomic_store(&app.log.run, APP_LOG_RUN);
+	}
+	else {
+		atomic_store(&app.log.run, APP_LOG_DED);
+		ShowWindow(GetConsoleWindow(), SW_SHOW);
+		printf("Log pump failed");
+	}
+	app.smd.log = app.log.pipe.wr;
 }
+
+static void app_logging_deinit_wait() {
+	for (int i = 50; i; --i) {
+		if (atomic_load(&app.log.run) == APP_LOG_DED)
+			return;
+		Sleep(10);
+	}
+}
+
 static void app_logging_deinit() {
-	if (!app.log.file)
-		return;
-	Sleep(500);
-	atomic_store(&app.log.run, false);
-	log_line(".");
-	if (app.log.pipe.app)
-		CloseHandle(app.log.pipe.app);
-	if (app.log.pipe.sink)
-		CloseHandle(app.log.pipe.sink);
-	if (app.log.file)
+	Sleep(30);
+	if (atomic_load(&app.log.run) == APP_LOG_RUN)
+		atomic_store(&app.log.run, APP_LOG_DIE);
+	log_line("");
+	app_logging_deinit_wait();
+	if (app.log.pipe.wr != INVALID_HANDLE_VALUE)
+		CloseHandle(app.log.pipe.wr);
+	if (app.log.pipe.rd != INVALID_HANDLE_VALUE)
+		CloseHandle(app.log.pipe.rd);
+	if (app.log.file != INVALID_HANDLE_VALUE)
 		CloseHandle(app.log.file);
-	app.log.file = 0;
 }
+
 ////////////////////////////////////////////////////////////////////////////////
+
+static void app_load_dll() {
+	const char* loc = "tor.dll";
+	HRSRC tor = FindResource(0, MAKEINTRESOURCE(2), RT_RCDATA);
+	void* bytes = LockResource(LoadResource(0, tor));
+	DWORD len = SizeofResource(0, tor);
+	HANDLE f = CreateFileA(loc, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	if (f == INVALID_HANDLE_VALUE)
+		return;
+	WriteFile(f, bytes, len, &len, 0);
+	CloseHandle(f);
+	app.smd.dll = LoadLibrary(loc);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 static bool app_is_elevated() {
 	HANDLE h = NULL;
 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &h))
@@ -104,7 +141,8 @@ static bool app_is_elevated() {
 	CloseHandle(h);
 	return elevation.TokenIsElevated;
 }
-static void app_elevate(int argn, char* argv[]) {
+
+static int app_elevate(int argn, char* argv[]) {
 	char cmd[2048];
 	cmd[0] = '\0';
 	const char* elevate_cmd = "--elevated --append-log-file";
@@ -112,7 +150,7 @@ static void app_elevate(int argn, char* argv[]) {
 	for (int i = 1; i < argn; ++i)
 		l += strlen(argv[i]) + 1;
 	if (l >= sizeof(cmd))
-		return;
+		return -1;
 	for (int i = 1; i < argn; ++i) {
 		strcat(cmd, argv[i]);
 		strcat(cmd, " ");
@@ -122,7 +160,7 @@ static void app_elevate(int argn, char* argv[]) {
 	GetModuleFileName(0, exe, sizeof(exe));
 	SHELLEXECUTEINFO sei;
 	sei.cbSize = sizeof(sei);
-	sei.fMask = SEE_MASK_DEFAULT | SEE_MASK_NOASYNC;
+	sei.fMask = SEE_MASK_DEFAULT | SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
 	sei.hwnd = 0;
 	sei.lpVerb = "runas";
 	sei.lpFile = exe;
@@ -131,63 +169,25 @@ static void app_elevate(int argn, char* argv[]) {
 	sei.nShow = SW_NORMAL;
 	sei.hInstApp = 0;
 	ShellExecuteExA(&sei);
+	return ((int)sei.hInstApp > 32) ? 0 : -1;
 }
-////////////////////////////////////////////////////////////////////////////////
-static BOOL CALLBACK app_find_swtor(HWND win, LPARAM par) {
-	if (!IsWindowVisible(win))
-		return TRUE;
-	DWORD pid;
-	DWORD tid = GetWindowThreadProcessId(win, &pid);
-	HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
-	if (!h)
-		return TRUE;
-	char exe[2048] = "";
-	GetModuleFileNameEx(h, 0, exe, sizeof(exe));
-	CloseHandle(h);
-	if (!strstr(exe, "swtor.exe"))
-		return TRUE;
-	app.smd.win = win;
-	app.smd.thread = tid;
-	app.smd.swtor = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_DUP_HANDLE, 0, pid);
+
+static BOOL WINAPI app_signal_handler(DWORD ctrl) {
+	smd_quit();
+	app_logging_deinit_wait();
 	return FALSE;
 }
-static void CALLBACK app_check_swtor(HWND Arg1, UINT Arg2, UINT_PTR Arg3, DWORD Arg4) {
-	if (app.smd.swtor) {
-		DWORD active = 0;
-		GetExitCodeProcess(app.smd.swtor, &active);
-		if (active != STILL_ACTIVE) {
-			CloseHandle(app.smd.swtor);
-			log_line(APP_SEARCH_SWTOR);
-			smd_deinit();
-			app.smd.swtor = 0;
-		}
-	}
-	if (app.smd.swtor)
-		return;
-	EnumWindows(app_find_swtor, 0);
-	if (!app.smd.swtor)
-		return;
-	log_line("SWTOR found");
-	smd_init(&app.smd);
-}
-static void app_end() {
-	atomic_store(&app.run, false);
-	while (!atomic_load_explicit(&app.done, memory_order_relaxed))
-		Sleep(0);
-}
+
 ////////////////////////////////////////////////////////////////////////////////
-static void main_signal(int signal) {
-	exit(0);
-}
+
 int main(int argn, char* argv[]) {
 	struct option lopt[] = {
-		{ "elevated", no_argument, &app.elevated, 1 },
+		{ "elevated", no_argument, &app.smd.elevated, 1 },
 		{ "delay", required_argument, 0, 'd' },
 		{ "x-offset", required_argument, 0, 'x' },
 		{ "y-offset", required_argument, 0, 'y' },
 		{ "append-log-file", no_argument, &app.log.append, 1 },
-		{ "disable-console-log", no_argument, &app.log.console, 0 },
-		{ "disable-ui-scan", no_argument, 0, 's' },
+		{ "secrets", no_argument, &app.smd.secrets, 1 },
 		{ 0, 0, 0, 0 }
 	};
 	int ix = 0;
@@ -203,54 +203,30 @@ int main(int argn, char* argv[]) {
 		case 'y':
 			app.smd.y = atoi(optarg);
 			break;
-		case 's':
-			app.smd.scan = false;
-			break;
 		}
 	}
-	atomic_store(&app.run, true);
-	if (app_logging_init()) {
-		printf("Can't open log file");
-		return -1;
-	}
 
-	log_init(&app.log.pipe.app);
-	log_designate_thread("smd");
+	app_logging_init();
+
 	for (int i = 1; i < argn; ++i)
 		log_line("arg %i: %s", i, argv[i]);
 
 	if (!app_is_elevated()) {
 		log_line("Not elevated");
-		if (app.elevated) {
-			log_line("Elevation attempt failed");
-			app_logging_deinit();
-		}
-		else {
-			app_logging_deinit();
-			app_elevate(argn, argv);
-		}
-		return -1;
+		if (app.smd.elevated)
+			log_line("Elevation failed");
+		else if (app_elevate(argn, argv))
+			log_line("Elevation denied");
+		else
+			return app_logging_deinit(), 0;
+		app.smd.elevated = 0;
 	}
-	atexit(app_end);
-	signal(SIGABRT, main_signal);
-	signal(SIGINT, main_signal);
-	signal(SIGTERM, main_signal);
-	signal(SIGBREAK, main_signal);
 
-	log_line(APP_SEARCH_SWTOR);
-	MSG msg;
-	UINT_PTR ticker = SetTimer(0, 0, 1000, app_check_swtor);
-	while (GetMessageA(&msg, 0, 0, 0) != -1) {
-		if (msg.message == WM_QUIT || !atomic_load_explicit(&app.run, memory_order_relaxed))
-			break;
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-		if (app.smd.swtor)
-			smd_process_msg(&msg);
-	}
-	log_line("Exit");
-	smd_deinit();
+	app_load_dll();
+	SetConsoleCtrlHandler(app_signal_handler, TRUE);
+	int ret = smd_run(&app.smd);
+	if (app.smd.dll)
+		FreeLibrary(app.smd.dll);
 	app_logging_deinit();
-	atomic_store(&app.done, true);
-	return 0;
+	return ret;
 }

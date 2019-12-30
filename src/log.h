@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-void log_init(void* pipe);
+void log_init(void* pipe, int epoch);
 void log_designate_thread(const char* name);
 void log_line(const char* str, ...);
 void log_deinit();

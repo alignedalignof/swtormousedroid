@@ -9,7 +9,6 @@
 
 #include "minhook-master/include/MinHook.h"
 
-#include "uiscan/uiscan.h"
 #include "log.h"
 #include "smd.h"
 
@@ -23,99 +22,14 @@ struct {
 		int y;
 		int show;
 	} cross;
-	struct {
-		DWORD thread;
-		HANDLE pipe;
-	} swtor;
-	struct {
-		UiElement elements[20];
-		int count;
-		uint8_t flash;
-		int flash_tick;
-		uint32_t scans;
-		int report;
-	} ui;
 } static d3d;
 
-static void d3d_highlight_x(IDirect3DDevice9* device, IDirect3DSurface9* ui, UiElement* element) {
-	RECT line;
-	line.top = element->top - 2;
-	line.bottom = element->top;
-	line.left = element->left - 2;
-	line.right = element->left;
-	device->ColorFill(ui, &line, D3DCOLOR_RGBA(255, 255, 255, 255));
-}
-static void d3d_highlight_loot(IDirect3DDevice9* device, IDirect3DSurface9* ui, UiElement* element, D3DCOLOR color)
-{
-	if (d3d.ui.flash & 1)
-		color = D3DCOLOR_RGBA(255, 0, 0, 255);
-	RECT thickLine;
-	thickLine.top = element->top - 1;
-	thickLine.bottom = element->top;
-	thickLine.left = element->left - 1;
-	thickLine.right = element->right + 1;
-	device->ColorFill(ui, &thickLine, color);
-
-	thickLine.top = element->bottom;
-	thickLine.bottom = element->bottom + 1;
-	device->ColorFill(ui, &thickLine, color);
-
-	thickLine.top = element->top;
-	thickLine.bottom = element->bottom;
-	thickLine.left = element->left - 1;
-	thickLine.right = element->left;
-	device->ColorFill(ui, &thickLine, color);
-
-	thickLine.left = element->right;
-	thickLine.right = element->right + 1;
-	device->ColorFill(ui, &thickLine, color);
-}
-static void d3d_highlight_elements(IDirect3DDevice9* device, IDirect3DSurface9* ui, UiElement* element)
-{
-
-	switch (element->control) {
-	case UI_CONTROL_X:
-		d3d_highlight_x(device, ui, element);
-		break;
-	case UI_CONTROL_GREED:
-		d3d_highlight_loot(device, ui, element, D3DCOLOR_RGBA(0, 255, 255, 255));
-		break;
-	case UI_CONTROL_NEED:
-		d3d_highlight_loot(device, ui, element, D3DCOLOR_RGBA(255, 255, 0, 255));
-		break;
-	}
-}
 static HRESULT APIENTRY (*OrigEndScene)(IDirect3DDevice9* device);
 static HRESULT APIENTRY MyEndScene(IDirect3DDevice9* device) {
 	IDirect3DSurface9* ui = 0;
 	device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &ui);
 	if (!ui)
 		return OrigEndScene(device);
-	UiElement elements[20];
-	uint16_t count = sizeof(elements)/sizeof(*elements);
-	if (uiscan_run(device, elements, &count) == UI_SCAN_DONE) {
-		++d3d.ui.scans;
-		if (!uiscan_same(elements, d3d.ui.elements, count, d3d.ui.count)) {
-			if (!count || WriteFile(d3d.swtor.pipe, elements, count*sizeof(*elements), 0, 0))
-				PostThreadMessageA(d3d.swtor.thread, SMD_MSG_SCAN, count, 0);
-			d3d.ui.count = count;
-			for (int i = 0; i < count; ++i)
-				d3d.ui.elements[i] = elements[i];
-		}
-	}
-	if (GetTickCount() - d3d.ui.report > 30*1000) {
-		d3d.ui.report = GetTickCount();
-		log_line("UI scans: %u", d3d.ui.scans);
-	}
-	int dt = GetTickCount() - d3d.ui.flash_tick;
-	if (d3d.ui.flash && dt > 500) {
-		++d3d.ui.flash;
-		d3d.ui.flash_tick = GetTickCount();
-		if (d3d.ui.flash == 6)
-			d3d.ui.flash = 0;
-	}
-	for (int i = 0; i < d3d.ui.count; ++i)
-		d3d_highlight_elements(device, ui, &d3d.ui.elements[i]);
 	if (d3d.cross.show)
 	{
 		RECT r;
@@ -128,14 +42,8 @@ static HRESULT APIENTRY MyEndScene(IDirect3DDevice9* device) {
 	ui->Release();
 	return OrigEndScene(device);
 }
+
 int d3d_init(DWORD thread, HANDLE pipe) {
-	d3d.swtor.pipe = pipe;
-	d3d.swtor.thread = thread;
-
-	if (d3d.swtor.pipe)
-		if (uiscan_init())
-			return -1;
-
 	MH_Initialize();
 
 	WNDCLASSEX cls;
@@ -194,21 +102,21 @@ cleanup:
 	UnregisterClass(cls.lpszClassName, cls.hInstance);
 	return ret;
 }
+
 void d3d_deinit() {
 	MH_Uninitialize();
-	d3d.ui.report = GetTickCount();
-	if (d3d.swtor.pipe)
-		uiscan_deinit();
 }
+
 void d3d_cross(int x, int y) {
 	d3d.cross.x = x;
 	d3d.cross.y = y;
 	d3d.cross.show = 1;
 }
+
 void d3d_nocross() {
 	d3d.cross.show = 0;
 }
+
 void d3d_flash_loot() {
-	d3d.ui.flash = 1;
-	d3d.ui.flash_tick = GetTickCount();
+
 }
