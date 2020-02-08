@@ -197,7 +197,7 @@ static LRESULT CALLBACK smd_mouse_hook(int nCode, WPARAM wParam, LPARAM lParam) 
 	bool is_app = smd_check_app_window(w);
 	if (!is_app && smd.state == SMD_ACTIVE)
 		smd_toggle();
-	if (!is_app || (mouse.flags & LLMHF_INJECTED))
+	if (!is_app || (wParam > WM_MOUSEWHEEL) || (mouse.flags & LLMHF_INJECTED))
 		return CallNextHookEx(0, nCode, wParam, lParam);
 
 	if (smd.state == SMD_ACTIVATING)
