@@ -304,7 +304,7 @@ static void smd_gui_opt(Opt* opt) {
 		gui.opts[SMD_OPT_ACT_SMD].selected = false;
 		smd_gui_post_toggler();
 		break;
-	case SMD_OPT_IDK:
+	case SMD_OPT_LOOT:
 	case SMD_OPT_NO_U:
 		smd_gui_post_io(SMD_MSG_CFG, SMD_CFG_MAKE_OPT(t), opt->selected);
 		break;
@@ -885,6 +885,10 @@ int smd_gui_bind_code(SmdBind b, SmdMod m) {
 	return bind->code;
 }
 
+int smd_gui_get_opt(int opt) {
+	return (opt < SMD_OPT_CNT) ? gui.opts[opt].selected : 0;
+}
+
 DWORD WINAPI smd_gui_run(LPVOID arg) {
 	log_designate_thread("gui");
 	log_line("Run...");
@@ -1075,11 +1079,9 @@ static struct Gui gui = {
 			.help = "Show tooltips when hovering\nover elements",
 			.selected = true,
 		},
-		[SMD_OPT_IDK] = {
-			.name = "UI assist",
-			.help = "maybe next decade",
-			.hidden = true,
-			.selected = true,
+		[SMD_OPT_LOOT] = {
+			.name = "Auto loot",
+			.help = "Auto loot while mouselook is active\nPress E to switch between need/greed/pass",
 		},
 		[SMD_OPT_CONSOLE] = {
 			.name = "Console",
@@ -1094,12 +1096,12 @@ static struct Gui gui = {
 		},
 		[SMD_OPT_ACT_SMD] = {
 			.name = "Middle click",
-			.help = "Toggle mouselook mode with a middle click\nHold middle click to emit clicks\nUse within SWToR or current UI to test",
+			.help = "Toggle mouselook mode with a middle click\nHold middle click to middle click\nPress Q to left-right click in mouselook mode",
 			.selected = true,
 		},
 		[SMD_OPT_ACT_KEY] = {
 			.name = "Key",
-			.help = "Toggle mouselook mode with a key\nUse within SWToR or SMD",
+			.help = "Toggle mouselook mode with a key\nPress Q to left-right click in mouselook mode",
 		},
 	},
 	.minx = {

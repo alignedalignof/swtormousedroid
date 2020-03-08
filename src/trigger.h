@@ -20,7 +20,6 @@ typedef struct {
 	int tick;
 	int timeout;
 	int state;
-	bool auto_release;
 	struct {
 		void (*once)(void);
 		void (*twice)(void);
@@ -54,16 +53,14 @@ static inline void trigger_release(trigger_t* trigger) {
 	switch (trigger->state) {
 	case TRIGGER_ONCE:
 		trigger->state = TRIGGER_IDLE;
-		if (GetTickCount() - trigger->tick < trigger->timeout)
-		{
-			if (trigger->cb.twice || trigger->cb.held)
-				trigger->state = TRIGGER_UP;
-			else if (trigger->cb.once)
-				trigger->cb.once();
-		}
-		else if (trigger->cb.pressed) {
-			trigger->cb.pressed();
-		}
+		if (trigger->cb.twice || trigger->cb.held)
+			trigger->state = TRIGGER_UP;
+		else if (trigger->cb.once)
+			trigger->cb.once();
+		break;
+	case TRIGGER_PRESSED:
+		trigger->state = TRIGGER_IDLE;
+		trigger->cb.pressed();
 		break;
 	case TRIGGER_DOWN:
 		trigger->state = TRIGGER_IDLE;
@@ -91,13 +88,15 @@ static inline void trigger_tick(trigger_t* trigger) {
 			trigger->cb.once();
 		break;
 	case TRIGGER_ONCE:
-		if (!trigger->auto_release || !trigger->cb.pressed)
-			break;
-		trigger->state = TRIGGER_PRESSED;
-		//ikr
-	case TRIGGER_PRESSED:
+		if (trigger->cb.pressed)
+			trigger->cb.pressed();
 		trigger->tick += 3*trigger->timeout;
-		trigger->cb.pressed();
+		trigger->state = TRIGGER_PRESSED;
+		break;
+	case TRIGGER_PRESSED:
+		if (trigger->cb.pressed)
+			trigger->cb.pressed();
+		trigger->tick += 3*trigger->timeout;
 		break;
 	case TRIGGER_DOWN:
 		trigger->state = TRIGGER_IDLE;

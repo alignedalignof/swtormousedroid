@@ -26,12 +26,14 @@ static void smd_dll_handle(MSG* msg) {
 		else {
 			log_line("Exit");
 			log_deinit();
+			PostThreadMessageA(dll.io, SMD_MSG_HANDLE, -1, 0);
 		}
 		break;
 	case SMD_HANDLE_IO_TID:
-		dll.io = (DWORD)msg->lParam;
-		if (dll.io)
-			PostThreadMessageA(dll.io, SMD_MSG_HANDLE, SMD_HANDLE_UI, d3d_init(0, 0));
+		if (msg->lParam)
+			dll.io = (DWORD)msg->lParam;
+		if (msg->lParam)
+			PostThreadMessageA(dll.io, SMD_MSG_HANDLE, SMD_HANDLE_UI, d3d_init(dll.io, 0));
 		else
 			d3d_deinit();
 		break;
@@ -51,8 +53,12 @@ LRESULT CALLBACK GetMsgProc(int code, WPARAM wParam, LPARAM lParam) {
 	case SMD_MSG_NO_CROSS:
 		d3d_nocross();
 		break;
-	case SMD_MSG_FLASH_LOOT:
-		d3d_flash_loot();
+	case SMD_MSG_SCAN:
+		d3d_scan(msg.wParam);
+		break;
+	case SMD_MSG_LOOT:
+		log_line("greedings");
+		d3d_loot(msg.wParam);
 		break;
 	}
 	return CallNextHookEx(0, code, wParam, lParam);

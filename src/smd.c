@@ -3,7 +3,7 @@
 
 #include "log.h"
 #include "trigger.h"
-
+#include "torui/torui.h"
 #include "smd.h"
 
 #define SMD_CNT_MAX							50
@@ -16,6 +16,7 @@ typedef enum {
 
 struct smd {
 	UINT_PTR ticker;
+
 	int x;
 	int y;
 	struct {
@@ -33,6 +34,8 @@ struct smd {
 		trigger_t bwd;
 		trigger_t mid;
 		trigger_t key;
+		trigger_t click;
+		trigger_t loot;
 	} trigger;
 	bool mods[SMD_MOD_CNT];
 	smd_cfg_t cfg;
@@ -55,6 +58,15 @@ struct smd {
 	HWND win;
 	LPARAM toggle;
 	bool ack;
+	uint8_t ui;
+
+	struct {
+		UINT_PTR ticker;
+		const char* desc[3];
+		torui_e opts[3];
+		uint8_t def;
+		uint8_t foc;
+	} loot;
 } static smd;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -65,8 +77,8 @@ static void smd_post_io(UINT msg, WPARAM wPar, LPARAM lPar) {
 }
 
 static void smd_post_tor(UINT msg, WPARAM wPar, LPARAM lPar) {
-	if (smd.handle.tor.tid)
-		PostThreadMessage(smd.handle.tor.tid, msg, wPar, lPar);
+	if (smd.handle.tor.win)
+		PostMessage(smd.handle.tor.win, msg, wPar, lPar);
 }
 
 static void smd_post_gui(UINT msg, WPARAM wPar, LPARAM lPar) {
@@ -89,14 +101,18 @@ static void smd_post_win_check(HWND hwnd) {
 	smd_post_io(SMD_MSG_TOR_CHK, 0, (LPARAM)hwnd);
 }
 
+static bool smd_ui_has(torui_e ui) {
+	return smd.ui & (1 << ui);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static void smd_trigger_tick() {
-	for (trigger_t* t = (trigger_t*)&smd.trigger; t < &smd.trigger.mid; ++t)
+	for (trigger_t* t = (trigger_t*)&smd.trigger; t <= &smd.trigger.loot; ++t)
 		trigger_tick(t);
 }
 
-static void smd_trigger_reset() {
+static void smd_trigger_reset_binds() {
 	for (trigger_t* t = (trigger_t*)&smd.trigger; t < &smd.trigger.mid; ++t)
 		trigger_reset(t);
 	smd.mods[SMD_MOD_NON] = false;
@@ -106,8 +122,10 @@ static void smd_trigger_reset() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static CALLBACK void smd_auto_loot(HWND hwnd, UINT msg, UINT_PTR timer, DWORD millis);
+
 static void smd_set_state(smd_state_e state) {
-	int timeouts[] = { 0, 100, 500, };
+	int timeouts[] = { 0, 500, 1000, };
 	smd.timeout = GetTickCount() + timeouts[state];
 	smd.state = state;
 	if (state == SMD_ACTIVATING)
@@ -118,12 +136,18 @@ static void smd_toggle() {
 	switch (smd.state) {
 	case SMD_INACTIVE:
 		smd_set_state(SMD_ACTIVATING);
-		smd_trigger_reset();
+		smd_trigger_reset_binds();
+		if (smd_ui_has(TORUI_X) && !smd_ui_has(TORUI_GREED) && !smd_ui_has(TORUI_NEED)) {
+			smd_post_io(SMD_MSG_CLICK_UI, TORUI_X, 0);
+			smd_post_io(SMD_MSG_CLICK_UI, TORUI_X, 0);
+			smd_post_io(SMD_MSG_CLICK_UI, TORUI_X, 0);
+		}
 		smd_post_toggle(true);
 		break;
 	default:
 		smd_set_state(SMD_INACTIVE);
-		smd_trigger_reset();
+		smd_trigger_reset_binds();
+		smd_auto_loot(0, 0, 0, 0);
 		smd_post_toggle(false);
 		break;
 	}
@@ -138,22 +162,66 @@ static void smd_active(CURSORINFO* c) {
 }
 
 static void CALLBACK smd_machine(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
-	trigger_tick(&smd.trigger.key);
-	trigger_tick(&smd.trigger.mid);
 	smd_trigger_tick();
+	if (smd.state == SMD_INACTIVE)
+		return;
+
 	CURSORINFO c;
 	c.cbSize = sizeof(CURSORINFO);
-	if (smd.state != SMD_INACTIVE) {
-		c.cbSize = sizeof(CURSORINFO);
-		c.flags = 0;
-		GetCursorInfo(&c);
-		if (smd.state == SMD_ACTIVE)
-			smd_active(&c);
-		else if (smd.ack && !(c.flags & CURSOR_SHOWING))
-			smd_set_state(SMD_ACTIVE);
-		else if (dwTime > smd.timeout)
-			smd_toggle();
+	c.flags = 0;
+	GetCursorInfo(&c);
+	if (smd.state == SMD_ACTIVE)
+		smd_active(&c);
+	else if (smd.ack && !(c.flags & CURSOR_SHOWING))
+		smd_set_state(SMD_ACTIVE);
+	else if (dwTime > smd.timeout)
+		smd_toggle();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static CALLBACK void smd_auto_loot(HWND hwnd, UINT msg, UINT_PTR timer, DWORD millis) {
+	torui_e loot = smd.loot.opts[smd.loot.foc];
+	smd.loot.foc = smd.loot.def;
+	if (smd.loot.ticker)
+		KillTimer(0, smd.loot.ticker);
+	smd.loot.ticker = 0;
+	if (smd.state == SMD_ACTIVE) {
+		smd_set_state(SMD_ACTIVATING);
+		smd_post_io(SMD_MSG_CLICK_UI, loot, 0);
+		smd_post_toggle(true);
 	}
+}
+
+static void smd_request_loot() {
+	if (smd_ui_has(smd.loot.opts[smd.loot.foc])) {
+		smd_post_tor(SMD_MSG_LOOT, smd.loot.opts[smd.loot.foc], 0);
+		smd.loot.ticker = SetTimer(0, smd.loot.ticker, 2000, smd_auto_loot);
+	}
+}
+
+static void smd_select_loot() {
+	uint8_t* cnt = 0;
+	if ((smd.state == SMD_INACTIVE) && (smd.trigger.loot.state == TRIGGER_ONCE))
+		cnt = &smd.loot.def;
+	else if (smd.state == SMD_ACTIVE)
+		cnt = &smd.loot.foc;
+	if (!cnt)
+		return;
+	*cnt += 1;
+	if (*cnt >= sizeof(smd.loot.opts)/sizeof(*smd.loot.opts))
+		*cnt = 0;
+	if (cnt == &smd.loot.foc)
+		smd_request_loot();
+	else
+		log_line("Default loot options set to %s", smd.loot.desc[smd.loot.def]);
+}
+
+static void smd_update_ui(MSG* msg) {
+	smd.ui = msg->wParam;
+	if (smd.state != SMD_ACTIVE || smd.loot.ticker)
+		return;
+	smd_request_loot();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -166,8 +234,14 @@ static LRESULT CALLBACK smd_key_hook(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (key.flags & LLKHF_INJECTED)
 		return CallNextHookEx(0, nCode, wParam, lParam);
 
-	trigger_t* t = &smd.trigger.key;
-	if (smd.toggle == key.scanCode) {
+	trigger_t* t = 0;
+	if (smd.toggle == key.scanCode)
+		t = &smd.trigger.key;
+	else if (key.vkCode == 'Q')
+		t = &smd.trigger.click;
+	else if (key.vkCode == 'E')
+		t = &smd.trigger.loot;
+	if (t) {
 		if (wParam == WM_KEYUP)
 			trigger_release(t);
 		else if (!trigger_is_held(t))
@@ -187,6 +261,16 @@ static bool smd_check_app_window(HWND w) {
 	return smd.win == tor || smd.win == gui;
 }
 
+static void smd_mod_press(trigger_t* t) {
+	trigger_t* lmb = &smd.trigger.lmb;
+	trigger_t* rmb = &smd.trigger.rmb;
+	if ((t != lmb) && trigger_is_held(lmb) && !smd.mods[SMD_MOD_RMB])
+		smd.mods[SMD_MOD_LMB] = true;
+	if ((t != rmb) && trigger_is_held(rmb) && !smd.mods[SMD_MOD_LMB])
+		smd.mods[SMD_MOD_RMB] = true;
+	trigger_press(t);
+}
+
 static LRESULT CALLBACK smd_mouse_hook(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode != HC_ACTION)
 		return CallNextHookEx(0, nCode, wParam, lParam);
@@ -195,7 +279,7 @@ static LRESULT CALLBACK smd_mouse_hook(int nCode, WPARAM wParam, LPARAM lParam) 
 	memcpy(&mouse, (void*)lParam, sizeof(mouse));
 	HWND w = WindowFromPoint(mouse.pt);
 	bool is_app = smd_check_app_window(w);
-	if (!is_app && smd.state == SMD_ACTIVE)
+	if (!is_app && (smd.state == SMD_ACTIVE))
 		smd_toggle();
 	if (!is_app || (wParam > WM_MOUSEWHEEL) || (mouse.flags & LLMHF_INJECTED))
 		return CallNextHookEx(0, nCode, wParam, lParam);
@@ -222,13 +306,13 @@ static LRESULT CALLBACK smd_mouse_hook(int nCode, WPARAM wParam, LPARAM lParam) 
 		trigger_release(&smd.trigger.lmb);
 		break;
 	case WM_LBUTTONDOWN:
-		trigger_press(&smd.trigger.lmb);
+		smd_mod_press(&smd.trigger.lmb);
 		break;
 	case WM_RBUTTONUP:
 		trigger_release(&smd.trigger.rmb);
 		break;
 	case WM_RBUTTONDOWN:
-		trigger_press(&smd.trigger.rmb);
+		smd_mod_press(&smd.trigger.rmb);
 		break;
 	case WM_MOUSEWHEEL: {
 		trigger_t* wheel = ((int16_t)(mouse.mouseData >> 16)) < 0 ? &smd.trigger.bwd : &smd.trigger.fwd;
@@ -299,6 +383,8 @@ static void CALLBACK smd_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 	smd.trigger.fwd.timeout = 0.75*smd.cfg.delay;
 	smd.trigger.bwd.timeout = 0.75*smd.cfg.delay;
 	smd.trigger.key.timeout = smd.cfg.delay;
+	smd.trigger.click.timeout = smd.cfg.delay;
+	smd.trigger.loot.timeout = smd.cfg.delay;
 
 	smd.handle.hio = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)smd_io_run, &smd.cfg, 0, 0);
 	smd.handle.hui = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)smd_gui_run, &smd.cfg, 0, 0);
@@ -312,7 +398,7 @@ static void CALLBACK smd_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 static void smd_deinit() {
 	smd_post_io(SMD_MSG_HANDLE, SMD_HANDLE_TID, 0);
 	smd_post_gui(SMD_MSG_HANDLE, SMD_HANDLE_TID, 0);
-	for (int i = 0; i < 20; ++i) {
+	for (int i = 0; i < 200; ++i) {
 		Sleep(10);
 		DWORD ret = 0;
 		if (smd.handle.hio)
@@ -362,8 +448,10 @@ int smd_run(const smd_cfg_t* smd_cfg) {
 				break;
 			case SMD_MSG_TOGGLE:
 			case SMD_MSG_CLICK:
-			case SMD_MSG_CLICK_UI:
 				smd.ack = true;
+				break;
+			case SMD_MSG_SCAN:
+				smd_update_ui(&msg);
 				break;
 			case WM_CLOSE:
 				PostQuitMessage(0);
@@ -378,11 +466,26 @@ int smd_run(const smd_cfg_t* smd_cfg) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void smd_left_right_click() {
-	if (smd.state != SMD_ACTIVE)
+static void smd_left_right_click(trigger_t* t) {
+	if (smd.state != SMD_ACTIVE || t->state != TRIGGER_ONCE)
 		return;
 	smd_set_state(SMD_ACTIVATING);
 	smd_post_io(SMD_MSG_CLICK, 0, (LPARAM)smd.win);
+}
+
+static void smd_mid_click() {
+	if (smd.state == SMD_ACTIVE) {
+		smd_post_io(SMD_MSG_MID, 0, 0);
+		smd_post_io(SMD_MSG_MID, 0, 0);
+	}
+	else if (smd.trigger.mid.state == TRIGGER_ONCE) {
+		smd_post_io(SMD_MSG_MID, 0, 0);
+		smd_post_io(SMD_MSG_MID, 0, 0);
+	}
+}
+
+static void smd_q_click() {
+	smd_left_right_click(&smd.trigger.click);
 }
 
 static void smd_press_btn(SmdBind b, SmdMod m) {
@@ -404,20 +507,30 @@ static void smd_trigger(SmdBind b) {
 			smd_press_btn(b, SMD_MOD_NON);
 	}
 	else if (b < SMD_BIND_RMB) {
-		if (smd.mods[SMD_MOD_LMB])
-			smd.mods[SMD_MOD_LMB] = trigger_is_held(&smd.trigger.lmb);
-		else if (trigger_is_held(&smd.trigger.rmb))
-			smd_press_btn(b, SMD_MOD_RMB);
-		else if (!smd.mods[SMD_MOD_LMB])
-			smd_press_btn(b, SMD_MOD_NON);
+		if (!smd.mods[SMD_MOD_LMB]) {
+			if (!smd.mods[SMD_MOD_RMB]) {
+				if (smd.trigger.lmb.state != TRIGGER_PRESSED && smd.trigger.lmb.state != TRIGGER_ONCE)
+					smd_press_btn(b, SMD_MOD_NON);
+			}
+			else {
+				smd_press_btn(b, SMD_MOD_RMB);
+			}
+		}
 	}
 	else {
-		if (smd.mods[SMD_MOD_RMB])
-			smd.mods[SMD_MOD_RMB] = trigger_is_held(&smd.trigger.rmb);
-		else if (trigger_is_held(&smd.trigger.lmb))
-			smd_press_btn(b, SMD_MOD_LMB);
-		else
-			smd_press_btn(b, SMD_MOD_NON);
+		if (!smd.mods[SMD_MOD_RMB]) {
+			if (!smd.mods[SMD_MOD_LMB]) {
+				if (smd.trigger.rmb.state != TRIGGER_PRESSED && smd.trigger.rmb.state != TRIGGER_ONCE)
+					smd_press_btn(b, SMD_MOD_NON);
+			}
+			else {
+				smd_press_btn(b, SMD_MOD_LMB);
+			}
+		}
+	}
+	if ((smd.trigger.lmb.state == TRIGGER_IDLE) && (smd.trigger.rmb.state == TRIGGER_IDLE)) {
+		smd.mods[SMD_MOD_LMB] = false;
+		smd.mods[SMD_MOD_RMB] = false;
 	}
 }
 
@@ -474,6 +587,12 @@ static void smd_mid_once() {
 		smd_toggle();
 }
 
+static void smd_key_toggle() {
+	if (!smd.toggle || smd.trigger.key.state != TRIGGER_ONCE)
+		return;
+	smd_toggle();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct smd static smd = {
@@ -490,9 +609,8 @@ struct smd static smd = {
 		.mid = {
 			.cb = {
 				.once = smd_mid_once,
-				.pressed = smd_left_right_click,
+				.pressed = smd_mid_click,
 			},
-			.auto_release = true,
 		},
 		.rmb = {
 			.cb = {
@@ -515,10 +633,23 @@ struct smd static smd = {
 			},
 		},
 		.key = {
-			.auto_release = true,
 			.cb = {
-				.pressed = smd_toggle,
+				.pressed = smd_key_toggle,
 			},
 		},
+		.click = {
+			.cb = {
+				.pressed = smd_q_click,
+			},
+		},
+		.loot = {
+			.cb = {
+				.pressed = smd_select_loot,
+			},
+		},
+	},
+	.loot = {
+		.desc = { "Greed", "Need", "Pass" },
+		.opts = { TORUI_GREED, TORUI_NEED, TORUI_PASS },
 	},
 };

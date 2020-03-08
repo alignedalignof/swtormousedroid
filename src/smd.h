@@ -17,11 +17,12 @@ extern "C" {
 #define SMD_MSG_TOGGLE			(WM_APP + 4)
 #define SMD_MSG_SCAN			(WM_APP + 5)
 #define SMD_MSG_CLICK_UI		(WM_APP + 6)
-#define SMD_MSG_FLASH_LOOT		(WM_APP + 7)
+#define SMD_MSG_LOOT			(WM_APP + 7)
 #define SMD_MSG_CFG				(WM_APP + 8)
 #define SMD_MSG_CNTX			(WM_APP + 9)
 #define SMD_MSG_HANDLE			(WM_APP + 10)
 #define SMD_MSG_TOR_CHK			(WM_APP + 11)
+#define SMD_MSG_MID				(WM_APP + 12)
 
 #define SMD_LPAR_TO_CODE(x)		(((x) >> 16) & 0xffU)
 #define SMD_CODE_TO_LPAR(x)		((x) << 16)
@@ -70,7 +71,7 @@ enum {
 	SMD_OPT_EXT_BINDS,
 	SMD_OPT_MOD_BINDS,
 	SMD_OPT_TIPS,
-	SMD_OPT_IDK,
+	SMD_OPT_LOOT,
 	SMD_OPT_CONSOLE,
 	SMD_OPT_NO_U,
 	SMD_OPT_ACT_SMD,
@@ -118,12 +119,22 @@ void smd_gui_gradient_h(HDC hdc, int x0, int y0, COLORREF c0, int x1, int y1, CO
 void smd_gui_gradient_v(HDC hdc, int x0, int y0, COLORREF c0, int x1, int y1, COLORREF c1);
 const char* smd_gui_bind_name(int b);
 int smd_gui_bind_code(SmdBind b, SmdMod m);
+int smd_gui_get_opt(int opt);
 void smd_gui_close();
 
 void smd_gui_cntx_tip(int x, int y, const char* txt);
 void smd_gui_cntx_menu(int x, int y, SmdBind bind, SmdMod mod);
 void smd_gui_cntx_spawn(HWND parent);
 
+static inline bool smd_peek_messgae(WPARAM id, int ms) {
+	MSG msg;
+	for (int i = ms/10 + 1; i; --i) {
+		Sleep(10);
+		if (PeekMessage(&msg, 0, id, id, PM_NOREMOVE))
+			return true;
+	}
+	return false;
+}
 #ifdef __cplusplus
 }
 #endif

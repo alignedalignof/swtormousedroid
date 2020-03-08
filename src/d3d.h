@@ -9,9 +9,10 @@ extern "C" {
 
 int d3d_init(DWORD thread, HANDLE pipe);
 void d3d_deinit();
+void d3d_scan(int set);
+void d3d_loot(int loot);
 void d3d_cross(int x, int y);
 void d3d_nocross();
-void d3d_flash_loot();
 
 #ifdef __cplusplus
 }

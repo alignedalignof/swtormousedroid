@@ -14,7 +14,7 @@
 
 #define APP_DEFAULT_DELAY_MS				200
 #define APP_DEFAULT_X_OFS					50
-#define APP_DEFAULT_Y_OFS					45
+#define APP_DEFAULT_Y_OFS					41
 #define APP_LOG_INI							0
 #define APP_LOG_RUN							1
 #define APP_LOG_DIE							2

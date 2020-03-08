@@ -8,7 +8,7 @@
 #include <D3dx9tex.h>
 
 #include "minhook-master/include/MinHook.h"
-
+#include "torui/torui.h"
 #include "log.h"
 #include "smd.h"
 
@@ -22,14 +22,29 @@ struct {
 		int y;
 		int show;
 	} cross;
+	DWORD tid;
 } static d3d;
 
-static HRESULT APIENTRY (*OrigEndScene)(IDirect3DDevice9* device);
-static HRESULT APIENTRY MyEndScene(IDirect3DDevice9* device) {
+static HRESULT APIENTRY (*tor_reset)(D3DPRESENT_PARAMETERS* par);
+static HRESULT APIENTRY smd_reset(D3DPRESENT_PARAMETERS* par) {
+	log_line("D3D reset");
+	torui_reset();
+	return tor_reset(par);
+}
+
+static HRESULT APIENTRY (*tor_end_scene)(IDirect3DDevice9* device);
+static HRESULT APIENTRY smd_end_scene(IDirect3DDevice9* device) {
 	IDirect3DSurface9* ui = 0;
 	device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &ui);
 	if (!ui)
-		return OrigEndScene(device);
+		return tor_end_scene(device);
+	if (!tor_reset) {
+		DWORD* dVtable = (DWORD*)device;
+		dVtable = (DWORD*)dVtable[0];
+		if (MH_CreateHook((DWORD_PTR*)dVtable[16], (void*)&smd_reset, (void**)&tor_reset) == MH_OK)
+			MH_EnableHook((DWORD_PTR*)dVtable[16]);
+	}
+	torui_run(device, ui);
 	if (d3d.cross.show)
 	{
 		RECT r;
@@ -40,11 +55,17 @@ static HRESULT APIENTRY MyEndScene(IDirect3DDevice9* device) {
 		device->ColorFill(ui, &r, D3DCOLOR_RGBA(255, 255, 255, 255));
 	}
 	ui->Release();
-	return OrigEndScene(device);
+	return tor_end_scene(device);
+}
+
+static void d3d_scan_done() {
+	PostThreadMessage(d3d.tid, SMD_MSG_SCAN, 0, 0);
 }
 
 int d3d_init(DWORD thread, HANDLE pipe) {
 	MH_Initialize();
+
+	d3d.tid = thread;
 
 	WNDCLASSEX cls;
 	IDirect3D9* d3d9 = 0;
@@ -86,12 +107,13 @@ int d3d_init(DWORD thread, HANDLE pipe) {
 	dVtable = (DWORD*)dev;
 	dVtable = (DWORD*)dVtable[0];
 	ret = -7;
-	if (MH_CreateHook((DWORD_PTR*)dVtable[42], (void*)&MyEndScene, (void**)&OrigEndScene) != MH_OK)
+	if (MH_CreateHook((DWORD_PTR*)dVtable[42], (void*)&smd_end_scene, (void**)&tor_end_scene) != MH_OK)
 		goto cleanup;
 	ret = -8;
 	if (MH_EnableHook((DWORD_PTR*)dVtable[42]) != MH_OK)
 		goto cleanup;
 	ret = 0;
+	torui_init();
 cleanup:
 	if (dev)
 		dev->Release();
@@ -104,7 +126,12 @@ cleanup:
 }
 
 void d3d_deinit() {
+	torui_deinit();
 	MH_Uninitialize();
+}
+
+void d3d_scan(int set) {
+	torui_scan(d3d_scan_done, set);
 }
 
 void d3d_cross(int x, int y) {
@@ -113,10 +140,12 @@ void d3d_cross(int x, int y) {
 	d3d.cross.show = 1;
 }
 
+void d3d_loot(int loot) {
+	torui_e e = loot < TORUI_COUNT ? (torui_e)loot : TORUI_COUNT;
+	torui_loot(e);
+}
+
 void d3d_nocross() {
 	d3d.cross.show = 0;
 }
 
-void d3d_flash_loot() {
-
-}
