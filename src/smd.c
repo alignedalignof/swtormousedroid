@@ -100,7 +100,7 @@ static void smd_post_win_check(HWND hwnd) {
 
 static void smd_trigger_tick()
 {
-	for (trigger_t* t = (trigger_t*)&smd.trigger; t <= &smd.trigger.clk; ++t)
+	for (trigger_t* t = &smd.trigger.lmb; t <= &smd.trigger.clk; ++t)
 		trigger_tick(t);
 }
 
@@ -501,8 +501,16 @@ static void smd_press_btn(SmdBind b, bool mid, int mx, WPARAM allmods)
 			smd_post_gui(SMD_MSG_BIND, b, 0);
 			if (b >= SMD_BIND_FWD && b <= SMD_BIND_BWD_DBL) smd_post_io(SMD_MSG_SCROLL, 0, smd.last_scroll);
 			if (b == SMD_BIND_LFT || b == SMD_BIND_RGT) smd_post_io(SMD_MSG_SCROLL, 1, smd.last_scroll);
-			if (b == SMD_BIND_LMB || b == SMD_BIND_LMB_DBL || b == SMD_BIND_LMB_HLD || b == SMD_BIND_LMB_DBL_HLD) smd_click(1);
-			if (b == SMD_BIND_RMB || b == SMD_BIND_RMB_DBL || b == SMD_BIND_RMB_HLD || b == SMD_BIND_RMB_DBL_HLD) smd_click(2);
+
+			if (b == SMD_BIND_LMB || b == SMD_BIND_LMB_DBL) smd_click(1);
+			if (b == SMD_BIND_RMB || b == SMD_BIND_RMB_DBL) smd_click(2);
+
+			if (smd.trigger.lmb.state == TRIGGER_ONCE || smd.trigger.lmb.state == TRIGGER_TWICE)
+			if (b == SMD_BIND_LMB_HLD || b == SMD_BIND_LMB_DBL_HLD)
+				smd_click(1);
+			if (smd.trigger.rmb.state == TRIGGER_ONCE || smd.trigger.rmb.state == TRIGGER_TWICE)
+			if (b == SMD_BIND_RMB_HLD || b == SMD_BIND_RMB_DBL_HLD)
+				smd_click(2);
 			return;
 		}
 		smd_post_io(SMD_MSG_MOD, 8 | mods, 0);
@@ -528,24 +536,23 @@ static void smd_trigger_ex(SmdBind b, bool mid, int mx)
 	if (!modee) return; //how pathetic
 
 	int i = modee - &smd.trigger.lmb;
+	bool siuuu = (b == SMD_BIND_LMB_HLD || b == SMD_BIND_RMB_HLD) && !smd_gui_bind_code(b);
 	if (i < SMD_MB_CNT)
-	if (smd.modder[i] || (modee->state == TRIGGER_HOLD && smd_gui_is_hold_click_delayed((SmdMb)i)))
+	if (smd.modder[i] || (!siuuu && (modee->state == TRIGGER_HOLD || modee->state == TRIGGER_ONCE) && smd_gui_is_hold_click_delayed((SmdMb)i)))
 	{
 		return;
 	}
-	smd_press_btn(b, mid, mx, smd.modee[i]);
-	smd.modee[i] = 0;
+	bool dbl = b == SMD_BIND_FWD_DBL || b == SMD_BIND_BWD_DBL || b == SMD_BIND_LMB_DBL || b == SMD_BIND_RMB_DBL;
+	if (!dbl || modee->state != TRIGGER_IDLE) smd_press_btn(b, mid, mx, smd.modee[i]);
+	if (smd.cfg.secrets) log_line("trigger %i %i", i, modee->state);
+	if (modee->state == TRIGGER_IDLE) smd.modee[i] = 0;
 }
 
 static void smd_trigger(SmdBind b) { smd_trigger_ex(b, false, 0); }
 
 static void smd_q_click()
 {
-	if (smd.trigger.clk.state == TRIGGER_HOLD)
-	{
-		smd.trigger.clk.state = TRIGGER_DHOLD;
-		smd_click(3);
-	}
+	if (smd.trigger.clk.state == TRIGGER_ONCE) smd_click(3);
 }
 
 static void smd_q_q()
@@ -640,7 +647,7 @@ static void smd_mid_hold()
 static void smd_key_toggle()
 {
 	if (smd.key_toggle)
-	if (smd.trigger.key.state != TRIGGER_HOLD)
+	if (smd.trigger.key.state == TRIGGER_IDLE)
 		smd_toggle();
 }
 

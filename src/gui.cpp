@@ -993,6 +993,7 @@ static void _gui_load_binds()
 	_gui.codes[SMD_BIND_LFT] = 'X';
 	_gui.codes[SMD_BIND_RGT] = 'D';
 
+	_gui.mods[SMD_MMB] = SMD_MOD_SHIFT | SMD_MOD_CTRL;
 	_gui.mods[SMD_RMB] = SMD_MOD_SHIFT;
 
 	_gui.key_toggle =  MapVirtualKeyA(VK_SHIFT, MAPVK_VK_TO_VSC);

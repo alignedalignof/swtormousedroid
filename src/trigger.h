@@ -103,7 +103,6 @@ static inline void trigger_tick(trigger_t* trigger) {
 	case TRIGGER_ONCE:
 		if (dt < trigger->window.tap + trigger->window.press)
 			break;
-		trigger->state = TRIGGER_HOLD;
 		dt = trigger->window.repeat;
 		/* no break */
 	case TRIGGER_HOLD:
@@ -113,24 +112,25 @@ static inline void trigger_tick(trigger_t* trigger) {
 			trigger->cb.hold();
 		else if (trigger->cb.press)
 			trigger->cb.press();
+		trigger->state = TRIGGER_HOLD;
 		trigger->tick += trigger->window.repeat ? trigger->window.repeat : -trigger->tick;
 		break;
 	case TRIGGER_RELEASED:
 		if (dt < trigger->window.dtap)
 			break;
+		trigger->state = TRIGGER_IDLE;
 		if (trigger->cb.tap)
 			trigger->cb.tap();
-		trigger->state = TRIGGER_IDLE;
 		break;
 	case TRIGGER_DTAP:
 		if (dt < trigger->window.dtap)
 			break;
 		trigger->state = TRIGGER_IDLE;
+		trigger->cb.dtap();
 		break;
 	case TRIGGER_TWICE:
 		if (dt < trigger->window.dtap)
 			break;
-		trigger->state = TRIGGER_DHOLD;
 		dt = trigger->window.repeat;
 		/* no break */
 	case TRIGGER_DHOLD:
@@ -138,6 +138,7 @@ static inline void trigger_tick(trigger_t* trigger) {
 			break;
 		if (trigger->cb.dhold)
 			trigger->cb.dhold();
+		trigger->state = TRIGGER_DHOLD;
 		trigger->tick += trigger->window.repeat ? trigger->window.repeat : -trigger->tick;
 		break;
 	}
