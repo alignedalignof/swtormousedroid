@@ -1,21 +1,20 @@
-SWToR Mouse Droid(SMD)
+SWToR Mouse Droid
 ======================
 
 Description
 -----------
-Mouselook application with up to 28 click binds for Star Wars: The Old Republic.
+A *Star Wars: The Old Republic* mouselook application with configurable click binds
 
 Download
 --------
-[zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip) [exe](https://github.com/alignedalignof/swtormousedroid/raw/master/swtormousedroid.exe)
+[zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip)
+[exe](https://github.com/alignedalignof/swtormousedroid/raw/master/swtormousedroid5.exe)
+[source](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip)
 
 Usage
 -----
-![cheatsheet](cheatsheet.png)
+Launch the graphical user interface to configure click-key binding, mouselook toggle, and modifiers.
+See tooltips for more info.
+Mouselook can be activated within the app or SWToR.
 
-Launch the graphical user interface to configure click-key binding, mouselook toggling,
-and extra binding options. See context sensitive tooltips for detailed information.
-Mouselook can be activated within the GUI or SWToR window area.
-SMD requests elevated privilages in order to send click-binds to ToR as the latter
-requires eleveted privilages itself. If elevation is denied SMD will run in GUI-only
-mode.
+![cheatsheet](VIEWME.PNG)
