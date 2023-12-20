@@ -23,6 +23,10 @@ extern "C" {
 #define SMD_MSG_HANDLE			(WM_APP + 10)
 #define SMD_MSG_TOR_CHK			(WM_APP + 11)
 #define SMD_MSG_MID				(WM_APP + 12)
+#define SMD_MSG_MOD				(WM_APP + 13)
+#define SMD_MSG_MX				(WM_APP + 14)
+#define SMD_MSG_BIND			(WM_APP + 15)
+#define SMD_MSG_SCROLL				(WM_APP + 16)
 
 #define SMD_LPAR_TO_CODE(x)		(((x) >> 16) & 0xffU)
 #define SMD_CODE_TO_LPAR(x)		((x) << 16)
@@ -48,36 +52,32 @@ typedef enum {
 	SMD_BIND_LMB,
 	SMD_BIND_LMB_DBL,
 	SMD_BIND_LMB_PRS,
-	SMD_BIND_LMB_DBL_PRS,
+	SMD_BIND_LMB_HLD,
+	SMD_BIND_LMB_DBL_HLD,
 	SMD_BIND_RMB,
 	SMD_BIND_RMB_DBL,
 	SMD_BIND_RMB_PRS,
-	SMD_BIND_RMB_DBL_PRS,
+	SMD_BIND_RMB_HLD,
+	SMD_BIND_RMB_DBL_HLD,
+	SMD_BIND_LFT,
+	SMD_BIND_RGT,
 	SMD_BIND_CNT,
 } SmdBind;
 
-typedef enum {
-	SMD_MOD_NON,
-	SMD_MOD_LMB,
-	SMD_MOD_RMB,
-	SMD_MOD_CNT,
+typedef enum
+{
+	SMD_LMB,
+	SMD_MMB,
+	SMD_RMB,
+	SMD_MB_CNT,
+} SmdMb;
+
+typedef enum
+{
+	SMD_MOD_SHIFT = 1 << 0,
+	SMD_MOD_ALT = 1 << 1,
+	SMD_MOD_CTRL = 1 << 2,
 } SmdMod;
-
-enum {
-	SMD_MOD_BIND_CNT = SMD_BIND_CNT * SMD_MOD_CNT,
-};
-
-enum {
-	SMD_OPT_EXT_BINDS,
-	SMD_OPT_MOD_BINDS,
-	SMD_OPT_TIPS,
-	SMD_OPT_LOOT,
-	SMD_OPT_CONSOLE,
-	SMD_OPT_NO_U,
-	SMD_OPT_ACT_SMD,
-	SMD_OPT_ACT_KEY,
-	SMD_OPT_CNT,
-};
 
 enum {
 	SMD_WIN_TOR,
@@ -118,13 +118,16 @@ void smd_gui_line(HDC hdc, int x0, int y0, int x1, int y1);
 void smd_gui_gradient_h(HDC hdc, int x0, int y0, COLORREF c0, int x1, int y1, COLORREF c1);
 void smd_gui_gradient_v(HDC hdc, int x0, int y0, COLORREF c0, int x1, int y1, COLORREF c1);
 const char* smd_gui_bind_name(int b);
-int smd_gui_bind_code(SmdBind b, SmdMod m);
+int smd_gui_bind_code(SmdBind b);
+int smd_gui_get_mod(SmdMb mouse);
+int smd_gui_is_hold_click_delayed(SmdMb mouse);
+int smd_gui_get_key_toggle();
 int smd_gui_get_opt(int opt);
 void smd_gui_close();
 
-void smd_gui_cntx_tip(int x, int y, const char* txt);
-void smd_gui_cntx_menu(int x, int y, SmdBind bind, SmdMod mod);
-void smd_gui_cntx_spawn(HWND parent);
+void smd_gui_cntx_tip(int x, int y, const wchar_t* txt);
+void smd_gui_cntx_menu(int x, int y, SmdBind bind);
+void smd_gui_cntx_spawn(HWND parent, void* family);
 
 static inline bool smd_peek_messgae(WPARAM id, int ms) {
 	MSG msg;

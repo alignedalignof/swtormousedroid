@@ -8,7 +8,6 @@
 #include <D3dx9tex.h>
 
 #include "minhook-master/include/MinHook.h"
-#include "torui/torui.h"
 #include "log.h"
 #include "smd.h"
 
@@ -25,26 +24,11 @@ struct {
 	DWORD tid;
 } static d3d;
 
-static HRESULT APIENTRY (*tor_reset)(D3DPRESENT_PARAMETERS* par);
-static HRESULT APIENTRY smd_reset(D3DPRESENT_PARAMETERS* par) {
-	log_line("D3D reset");
-	torui_reset();
-	return tor_reset(par);
-}
-
 static HRESULT APIENTRY (*tor_end_scene)(IDirect3DDevice9* device);
 static HRESULT APIENTRY smd_end_scene(IDirect3DDevice9* device) {
 	IDirect3DSurface9* ui = 0;
 	device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &ui);
-	if (!ui)
-		return tor_end_scene(device);
-	if (!tor_reset) {
-		DWORD* dVtable = (DWORD*)device;
-		dVtable = (DWORD*)dVtable[0];
-		if (MH_CreateHook((DWORD_PTR*)dVtable[16], (void*)&smd_reset, (void**)&tor_reset) == MH_OK)
-			MH_EnableHook((DWORD_PTR*)dVtable[16]);
-	}
-	torui_run(device, ui);
+	if (!ui) return tor_end_scene(device);
 	if (d3d.cross.show)
 	{
 		RECT r;
@@ -58,10 +42,6 @@ static HRESULT APIENTRY smd_end_scene(IDirect3DDevice9* device) {
 	return tor_end_scene(device);
 }
 
-static void d3d_scan_done() {
-	PostThreadMessage(d3d.tid, SMD_MSG_SCAN, 0, 0);
-}
-
 int d3d_init(DWORD thread, HANDLE pipe) {
 	MH_Initialize();
 
@@ -73,13 +53,13 @@ int d3d_init(DWORD thread, HANDLE pipe) {
 	HWND win = 0;
 	D3DDISPLAYMODE display_mode;
 	D3DPRESENT_PARAMETERS present_parameters;
-	DWORD* dVtable;
+	uint64_t* dVtable;
 
 	memset(&cls, 0, sizeof(cls));
 	cls.cbSize = sizeof(WNDCLASSEX);
 	cls.style = CS_HREDRAW | CS_VREDRAW;
 	cls.lpfnWndProc = DefWindowProc;
-	cls.lpszClassName = "mousedroog";
+	cls.lpszClassName = "mousedroog5";
 	cls.hInstance = GetModuleHandle(0);
 	int ret = -2;
 	if (!RegisterClassEx(&cls))
@@ -104,16 +84,15 @@ int d3d_init(DWORD thread, HANDLE pipe) {
 	if (d3d9->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, win,
 		D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_DISABLE_DRIVER_MANAGEMENT, &present_parameters, &dev) != D3D_OK)
 		goto cleanup;
-	dVtable = (DWORD*)dev;
-	dVtable = (DWORD*)dVtable[0];
+	dVtable = (uint64_t*)dev;
+	dVtable = (uint64_t*)dVtable[0];
 	ret = -7;
-	if (MH_CreateHook((DWORD_PTR*)dVtable[42], (void*)&smd_end_scene, (void**)&tor_end_scene) != MH_OK)
+	if (MH_CreateHook((void*)dVtable[42], (void*)&smd_end_scene, (void**)&tor_end_scene) != MH_OK)
 		goto cleanup;
 	ret = -8;
-	if (MH_EnableHook((DWORD_PTR*)dVtable[42]) != MH_OK)
+	if (MH_EnableHook((void*)dVtable[42]) != MH_OK)
 		goto cleanup;
 	ret = 0;
-	torui_init();
 cleanup:
 	if (dev)
 		dev->Release();
@@ -125,27 +104,20 @@ cleanup:
 	return ret;
 }
 
-void d3d_deinit() {
-	torui_deinit();
+void d3d_deinit()
+{
 	MH_Uninitialize();
 }
 
-void d3d_scan(int set) {
-	torui_scan(d3d_scan_done, set);
-}
-
-void d3d_cross(int x, int y) {
+void d3d_cross(int x, int y)
+{
 	d3d.cross.x = x;
 	d3d.cross.y = y;
 	d3d.cross.show = 1;
 }
 
-void d3d_loot(int loot) {
-	torui_e e = loot < TORUI_COUNT ? (torui_e)loot : TORUI_COUNT;
-	torui_loot(e);
-}
-
-void d3d_nocross() {
+void d3d_nocross()
+{
 	d3d.cross.show = 0;
 }
 

@@ -8,7 +8,6 @@
 #include <windows.h>
 
 #include "getopt/getopt.h"
-#include "gui.h"
 #include "log.h"
 #include "smd.h"
 
@@ -115,29 +114,13 @@ static void app_logging_deinit() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void app_load_dll() {
-	const char* loc = "tor.dll";
-	HRSRC tor = FindResource(0, MAKEINTRESOURCE(2), RT_RCDATA);
-	void* bytes = LockResource(LoadResource(0, tor));
-	DWORD len = SizeofResource(0, tor);
-	HANDLE f = CreateFileA(loc, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-	if (f == INVALID_HANDLE_VALUE)
-		return;
-	WriteFile(f, bytes, len, &len, 0);
-	CloseHandle(f);
-	app.smd.dll = LoadLibrary(loc);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 static bool app_is_elevated() {
 	HANDLE h = NULL;
 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &h))
 		return FALSE;
-	TOKEN_ELEVATION elevation;
+	TOKEN_ELEVATION elevation = { .TokenIsElevated = FALSE };
 	DWORD len = sizeof(elevation);
-	if (!GetTokenInformation(h, TokenElevation, &elevation, sizeof( elevation ), &len))
-		elevation.TokenIsElevated = FALSE;
+	GetTokenInformation(h, TokenElevation, &elevation, sizeof(elevation), &len);
 	CloseHandle(h);
 	return elevation.TokenIsElevated;
 }
@@ -169,18 +152,35 @@ static int app_elevate(int argn, char* argv[]) {
 	sei.nShow = SW_NORMAL;
 	sei.hInstApp = 0;
 	ShellExecuteExA(&sei);
-	return ((int)sei.hInstApp > 32) ? 0 : -1;
+	return ((uintptr_t)sei.hInstApp > 32) ? 0 : -1;
 }
 
-static BOOL WINAPI app_signal_handler(DWORD ctrl) {
+static BOOL WINAPI app_signal_handler(DWORD ctrl)
+{
 	smd_quit();
 	app_logging_deinit_wait();
 	return FALSE;
 }
 
+static void app_load_dll()
+{
+	const char* loc = "smd5.dll";
+	HRSRC tor = FindResource(0, MAKEINTRESOURCE(2), RT_RCDATA);
+	void* bytes = LockResource(LoadResource(0, tor));
+	DWORD len = SizeofResource(0, tor);
+	FILE* f = fopen(loc, "wb");
+	if (!f)
+		return;
+	fwrite(bytes, len, 1, f);
+	fclose(f);
+	app.smd.dll = LoadLibrary(loc);
+	if (!app.smd.dll) log_line("%s not loaded: 0x%x", loc, GetLastError());
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
-int main(int argn, char* argv[]) {
+int main(int argn, char* argv[])
+{
 	struct option lopt[] = {
 		{ "elevated", no_argument, &app.smd.elevated, 1 },
 		{ "delay", required_argument, 0, 'd' },
@@ -192,7 +192,8 @@ int main(int argn, char* argv[]) {
 	};
 	int ix = 0;
 	int c;
-	while ((c = getopt_long(argn, argv, "", lopt, &ix)) != -1) {
+	while ((c = getopt_long(argn, argv, "", lopt, &ix)) != -1)
+	{
 		switch (c) {
 		case 'd':
 			app.smd.delay = atoi(optarg);
@@ -208,25 +209,25 @@ int main(int argn, char* argv[]) {
 
 	app_logging_init();
 
-	for (int i = 1; i < argn; ++i)
-		log_line("arg %i: %s", i, argv[i]);
+	for (int i = 1; i < argn; ++i) log_line("arg %i: %s", i, argv[i]);
 
-	if (!app_is_elevated()) {
+	if (!app_is_elevated())
+	{
 		log_line("Not elevated");
-		if (app.smd.elevated)
-			log_line("Elevation failed");
-		else if (app_elevate(argn, argv))
-			log_line("Elevation denied");
-		else
-			return app_logging_deinit(), 0;
+		if (app.smd.elevated) log_line("Elevation failed");
+		else if (app_elevate(argn, argv)) log_line("Elevation denied");
+		else return app_logging_deinit(), 0;
 		app.smd.elevated = 0;
+	}
+	else
+	{
+		app.smd.elevated = 2;
 	}
 
 	app_load_dll();
 	SetConsoleCtrlHandler(app_signal_handler, TRUE);
 	int ret = smd_run(&app.smd);
-	if (app.smd.dll)
-		FreeLibrary(app.smd.dll);
+	if (app.smd.dll) FreeLibrary(app.smd.dll);
 	app_logging_deinit();
 	return ret;
 }

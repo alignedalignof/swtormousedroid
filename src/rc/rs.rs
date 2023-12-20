@@ -1,0 +1,8 @@
+1 ICON "mouse.ico"
+2 RCDATA "smd5.bin"
+3 RCDATA "kai.jpg"
+4 RCDATA "valk.jpg"
+5 RCDATA "code.jpg"
+6 RCDATA "SWEuroBold.ttf"
+7 RCDATA "SWEuroRegular.ttf"
+8 RCDATA "mouse.jpg"

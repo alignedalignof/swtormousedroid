@@ -53,13 +53,6 @@ LRESULT CALLBACK GetMsgProc(int code, WPARAM wParam, LPARAM lParam) {
 	case SMD_MSG_NO_CROSS:
 		d3d_nocross();
 		break;
-	case SMD_MSG_SCAN:
-		d3d_scan(msg.wParam);
-		break;
-	case SMD_MSG_LOOT:
-		log_line("greedings");
-		d3d_loot(msg.wParam);
-		break;
 	}
 	return CallNextHookEx(0, code, wParam, lParam);
 }

@@ -4,42 +4,22 @@
 
 #include <stdint.h>
 
-#include "torui/torui.h"
 #include "smd.h"
 #include "log.h"
 
 static struct {
 	struct {
-		int x;
-		int y;
-		UINT_PTR ticker;
-		torui_scan_t scans[TORUI_SCANS];
-		uint8_t cnt;
-		uint8_t mask;
-	} ui;
-	struct {
 		HANDLE exe;
 		DWORD tid;
 		HWND win;
-	} tor;
-
-	smd_cfg_t smd;
-
-	struct {
 		HHOOK msg;
 		HANDLE log;
-	} scan;
-
+	} tor;
 	struct {
-		UINT_PTR timer;
-		DWORD flags;
-	} uno;
-
-	struct {
-		HANDLE file;
-		uint8_t* scans;
-	} map;
-
+		int x;
+		int y;
+	} ui;
+	smd_cfg_t smd;
 	HWND gui;
 } io;
 
@@ -58,42 +38,6 @@ static void smd_io_post_tor(UINT msg, WPARAM wPar, LPARAM lPar) {
 static void smd_io_post_gui(UINT msg, WPARAM wPar, LPARAM lPar) {
 	if (io.gui)
 		PostMessage(io.gui, msg, wPar, lPar);
-}
-
-static void smd_io_request_cap() {
-	smd_io_post_tor(SMD_MSG_SCAN, smd_gui_get_opt(SMD_OPT_LOOT), 0);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-static CALLBACK void smd_io_start_cap(HWND hwnd, UINT msg, UINT_PTR timer, DWORD millis) {
-	if (io.ui.ticker)
-		KillTimer(0, io.ui.ticker);
-	io.ui.ticker = 0;
-	smd_io_request_cap();
-}
-
-static CALLBACK void smd_io_no_u(HWND hwnd, UINT msg, UINT_PTR timer, DWORD millis) {
-	POINT p;
-	GetCursorPos(&p);
-	HWND win = WindowFromPoint(p);
-
-	io.uno.flags = (io.uno.flags == MOUSEEVENTF_LEFTUP) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
-
-	if (io.uno.flags == MOUSEEVENTF_LEFTUP || win == io.tor.win) {
-		INPUT input;
-		memset(&input, 0, sizeof(input));
-		input.type = INPUT_MOUSE;
-		input.mi.dwFlags = io.uno.flags;
-		SendInput(1, &input, sizeof(input));
-	}
-}
-
-static void smd_io_uno(bool set) {
-	if (set)
-		io.uno.timer = SetTimer(0, io.uno.timer, 500, smd_io_no_u);
-	else
-		KillTimer(0, io.uno.timer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -119,77 +63,144 @@ static void smd_io_click(MSG* msg) {
 	input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
 	SendInput(1, &input, sizeof(input));
 	Sleep(30);
-	input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-	SendInput(1, &input, sizeof(input));
-	input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-	SendInput(1, &input, sizeof(input));
-	input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
-	SendInput(1, &input, sizeof(input));
-	input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
-	SendInput(1, &input, sizeof(input));
+	if (msg->wParam & 1)
+	{
+		input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+		SendInput(1, &input, sizeof(input));
+		input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+		SendInput(1, &input, sizeof(input));
+	}
+	if (msg->wParam & 2)
+	{
+		input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+		SendInput(1, &input, sizeof(input));
+		input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+		SendInput(1, &input, sizeof(input));
+	}
 	Sleep(30);
 	smd_rmb_center(msg);
 }
 
-static void smd_io_update_ui(MSG* msg);
+static void smd_io_mod(MSG* msg)
+{
+	static WORD shift_scan;
+	static WORD ctrl_scan;
+	static WORD alt_scan;
 
-static void smd_io_click_tor(torui_e ui) {
-	if ((io.ui.mask & (1 << ui)) == 0)
-		return;
+	shift_scan = shift_scan ? shift_scan : MapVirtualKeyA(VK_SHIFT, MAPVK_VK_TO_VSC);
+	ctrl_scan = ctrl_scan ? ctrl_scan : MapVirtualKeyA(VK_CONTROL, MAPVK_VK_TO_VSC);
+	alt_scan = alt_scan ? alt_scan : MapVirtualKeyA(VK_MENU, MAPVK_VK_TO_VSC);
 
-	INPUT input;
-	memset(&input, 0, sizeof(input));
-	input.type = INPUT_MOUSE;
-	input.mi.dwFlags = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_RIGHTUP;
-	SendInput(1, &input, sizeof(input));
-	Sleep(30);
+	bool shift = msg->wParam & 1;
+	bool alt = msg->wParam & 2;
+	bool ctrl = msg->wParam & 4;
+	bool down = msg->wParam & 8;
 
-	for (uint8_t i = 0; i < io.ui.cnt; ++i) {
-		torui_scan_t* scan = io.ui.scans + i;
-		if (scan->ui != ui)
-			continue;
-
-		POINT p;
-		p.x = scan->x + scan->w/2;
-		p.y = scan->y + scan->h/2;
-		ClientToScreen(io.tor.win, &p);
-		SetCursorPos(p.x, p.y);
-
-		input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-		SendInput(1, &input, sizeof(input));
-		Sleep(16);
-		input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-		SendInput(1, &input, sizeof(input));
-		Sleep(16);
-
-	}
-	Sleep(100);
-	smd_io_start_cap(0, 0, 0, 0);
-	if (smd_peek_messgae(SMD_MSG_SCAN, 300))
-		smd_io_update_ui(0);
-}
-
-static void smd_io_press(MSG* msg) {
-	WORD type = SMD_CFG_TYPE(msg->wParam);
-	int vk = msg->wParam;
-	int scan = msg->lParam;
-	if (!vk && !scan)
-		return;
-
-	INPUT key = {
+	int count = 0;
+	INPUT mods[3] =
+	{
+			{
 		.type = INPUT_KEYBOARD,
 		.ki = {
-			.wVk = vk,
-			.wScan = scan,
-			.dwFlags =  vk ? 0 : KEYEVENTF_SCANCODE,
+			.wVk = 0,
+			.wScan = 0,
+			.dwFlags =  (down ? 0 : KEYEVENTF_KEYUP) | KEYEVENTF_SCANCODE,
 			.time = 0,
 			.dwExtraInfo = 0,
 		},
+			}, {
+		.type = INPUT_KEYBOARD,
+		.ki = {
+			.wVk = 0,
+			.wScan = 0,
+			.dwFlags =  (down ? 0 : KEYEVENTF_KEYUP) | KEYEVENTF_SCANCODE,
+			.time = 0,
+			.dwExtraInfo = 0,
+		},
+			}, {
+		.type = INPUT_KEYBOARD,
+		.ki = {
+			.wVk = 0,
+			.wScan = 0,
+			.dwFlags =  (down ? 0 : KEYEVENTF_KEYUP) | KEYEVENTF_SCANCODE,
+			.time = 0,
+			.dwExtraInfo = 0,
+		},
+			}
 	};
-	SendInput(1, &key, sizeof(key));
-	key.ki.dwFlags |= KEYEVENTF_KEYUP;
+	if (shift) mods[count++].ki.wScan = shift_scan;
+	if (ctrl) mods[count++].ki.wScan = ctrl_scan;
+	if (alt) mods[count++].ki.wScan = alt_scan;
+	if (count)
+	{
+		SendInput(count, mods, sizeof(INPUT));
+		//Sleep(16);
+	}
+
+}
+
+static void smd_io_press(MSG* msg) {
+	static WORD shift_scan;
+	static WORD ctrl_scan;
+	static WORD alt_scan;
+
+	shift_scan = shift_scan ? shift_scan : MapVirtualKeyA(VK_SHIFT, MAPVK_VK_TO_VSC);
+	ctrl_scan = ctrl_scan ? shift_scan : MapVirtualKeyA(VK_CONTROL, MAPVK_VK_TO_VSC);
+	alt_scan = alt_scan ? alt_scan : MapVirtualKeyA(VK_MENU, MAPVK_VK_TO_VSC);
+
+	int vk = msg->wParam & 0xff;
+	int scan = msg->lParam;
+	bool shift = msg->wParam & 0x100;
+	bool alt = msg->wParam & 0x200;
+	bool ctrl = msg->wParam & 0x400;
+	bool down = msg->wParam & 0x800;
+	if (!vk && !scan)
+		return;
+
+	int count = 0;
+	INPUT keys[4] =
+	{
+			{
+		.type = INPUT_KEYBOARD,
+		.ki = {
+			.wVk = 0,
+			.wScan = 0,
+			.dwFlags =  KEYEVENTF_SCANCODE,
+			.time = 0,
+			.dwExtraInfo = 0,
+		},
+			}, {
+		.type = INPUT_KEYBOARD,
+		.ki = {
+			.wVk = 0,
+			.wScan = 0,
+			.dwFlags =  KEYEVENTF_SCANCODE,
+			.time = 0,
+			.dwExtraInfo = 0,
+		},
+			}, {
+		.type = INPUT_KEYBOARD,
+		.ki = {
+			.wVk = 0,
+			.wScan = 0,
+			.dwFlags =  KEYEVENTF_SCANCODE,
+			.time = 0,
+			.dwExtraInfo = 0,
+		},
+			}
+	};
+	if (shift) keys[count++].ki.wScan = shift_scan;
+	if (ctrl) keys[count++].ki.wScan = ctrl_scan;
+	if (alt) keys[count++].ki.wScan = alt_scan;
+	keys[count].ki.wVk = vk;
+	keys[count].ki.wScan = scan;
+	keys[count].ki.dwFlags = vk ? 0 : KEYEVENTF_SCANCODE;
+	count++;
+
+	SendInput(count, keys, sizeof(INPUT));
 	Sleep(16);
-	SendInput(1, &key, sizeof(key));
+	for (int i = 0; i < count; i++) keys[i].ki.dwFlags |= KEYEVENTF_KEYUP;
+	SendInput(count, keys, sizeof(INPUT));
 }
 
 static void smd_io_store_handle(MSG* msg) {
@@ -204,15 +215,15 @@ static void smd_io_store_handle(MSG* msg) {
 		break;
 	case SMD_HANDLE_UI:
 		log_line("D3D init %i", msg->lParam);
-		if (!msg->lParam)
-			smd_io_request_cap();
 		break;
 	}
 }
 
 static void smd_io_toggle(MSG* msg) {
 	HWND w = (HWND)msg->lParam;
-	if (msg->wParam) {
+	DWORD active = msg->wParam;
+	if (active)
+	{
 		RECT r;
 		GetClientRect(w, &r);
 		io.ui.x = (io.smd.x*r.right)/100;
@@ -225,10 +236,10 @@ static void smd_io_toggle(MSG* msg) {
 	INPUT input;
 	memset(&input, 0, sizeof(input));
 	input.type = INPUT_MOUSE;
-	input.mi.dwFlags = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_MIDDLEUP | (msg->wParam ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
+	input.mi.dwFlags = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_MIDDLEUP | (active ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
 	SendInput(1, &input, sizeof(input));
-	smd_io_post_gui(SMD_MSG_TOGGLE, msg->wParam, msg->lParam);
-	if (msg->wParam)
+	smd_io_post_gui(SMD_MSG_TOGGLE, active, (LPARAM)w);
+	if (active)
 		PostMessage(w, SMD_MSG_CROSS, 0, (io.ui.y << 16) | io.ui.x);
 	else
 		PostMessage(w, SMD_MSG_NO_CROSS, 0, 0);
@@ -236,76 +247,45 @@ static void smd_io_toggle(MSG* msg) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void smd_io_init_scan() {
-	if (!io.smd.dll)
-		return;
+static void smd_io_init_dll()
+{
+	if (!io.smd.dll) return;
 
-	HOOKPROC proc = (HOOKPROC)GetProcAddress(io.smd.dll, "GetMsgProc@12");
-	io.scan.msg = SetWindowsHookEx(WH_GETMESSAGE, proc, io.smd.dll, io.tor.tid);
-	if (!io.scan.msg)
-		return log_line("TOR messaging failed %x", GetLastError());
+	HOOKPROC proc = (HOOKPROC)GetProcAddress(io.smd.dll, "GetMsgProc");
+	io.tor.msg = SetWindowsHookEx(WH_GETMESSAGE, proc, io.smd.dll, io.tor.tid);
 
-	if (!DuplicateHandle(GetCurrentProcess(), io.smd.log, io.tor.exe, &io.scan.log, 0, false, DUPLICATE_SAME_ACCESS))
+	if (!io.tor.msg) return log_line("TOR messaging failed %x", GetLastError());
+	if (!DuplicateHandle(GetCurrentProcess(), io.smd.log, io.tor.exe, &io.tor.log, 0, false, DUPLICATE_SAME_ACCESS))
 		return log_line("TOR log failed %x", GetLastError());
 
 	LPARAM lPar;
-	memcpy(&lPar, &io.scan.log, sizeof(io.scan.log));
+	memcpy(&lPar, &io.tor.log, sizeof(io.tor.log));
 	smd_io_post_tor(SMD_MSG_HANDLE, SMD_HANDLE_EPOCH, io.smd.epoch);
 	smd_io_post_tor(SMD_MSG_HANDLE, SMD_HANDLE_LOG_WR, lPar);
 	smd_io_post_tor(SMD_MSG_HANDLE, SMD_HANDLE_IO_TID, (LPARAM)GetCurrentThreadId());
 }
 
-static void smd_io_deinit_scan() {
-	if (io.ui.ticker)
-		KillTimer(0, io.ui.ticker);
-	else
-		smd_peek_messgae(SMD_MSG_SCAN, 300);
-
+static void smd_io_deinit_dll() {
 	smd_io_post_tor(SMD_MSG_HANDLE, SMD_HANDLE_IO_TID, 0);
 	smd_io_post_tor(SMD_MSG_HANDLE, SMD_HANDLE_LOG_WR, 0);
 	if (io.tor.tid)
 		smd_peek_messgae(SMD_MSG_HANDLE, 200);
 
-	if (io.map.scans)
-		UnmapViewOfFile(io.map.scans);
-	if (io.map.file)
-		CloseHandle(io.map.file);
 	if (io.tor.exe)
 		CloseHandle(io.tor.exe);
-	if (io.scan.msg)
-		UnhookWindowsHookEx(io.scan.msg);
-	if (io.scan.log)
-		DuplicateHandle(GetCurrentProcess(), io.scan.log, 0, 0, 0, false, DUPLICATE_CLOSE_SOURCE);
+	if (io.tor.msg)
+		UnhookWindowsHookEx(io.tor.msg);
+	if (io.tor.log)
+		DuplicateHandle(GetCurrentProcess(), io.tor.log, 0, 0, 0, false, DUPLICATE_CLOSE_SOURCE);
 	io.tor.tid = 0;
 	io.tor.exe = 0;
 	io.tor.win = 0;
-	io.scan.log = 0;
-	io.scan.msg = 0;
-	io.map.file = 0;
-	io.map.scans = 0;
-	io.ui.ticker = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void smd_io_update_ui(MSG* msg) {
-	io.ui.cnt = 0;
-	if (!io.map.file)
-		io.map.file = OpenFileMapping(FILE_MAP_ALL_ACCESS, 0, "SmdToRUi");
-	if (io.map.file && !io.map.scans)
-		io.map.scans = (uint8_t*)MapViewOfFile(io.map.file, FILE_MAP_ALL_ACCESS, 0, 0, 0);
-	if (io.map.scans) {
-		io.ui.cnt = io.map.scans[0];
-		memcpy(io.ui.scans, io.map.scans + 1, io.ui.cnt*sizeof(torui_scan_t));
-	}
-	io.ui.mask = 0;
-	for (uint8_t i = 0; i < io.ui.cnt; ++i)
-		io.ui.mask |= 1 << io.ui.scans[i].ui;
-	smd_io_post_smd(SMD_MSG_SCAN, io.ui.mask, 0);
-	io.ui.ticker = SetTimer(0, io.ui.ticker, 250, smd_io_start_cap);
-}
-
-static void smd_io_mid() {
+static void smd_io_mid()
+{
 	INPUT input;
 	memset(&input, 0, sizeof(input));
 	input.type = INPUT_MOUSE;
@@ -316,9 +296,35 @@ static void smd_io_mid() {
 	SendInput(1, &input, sizeof(input));
 }
 
-static void smd_io_chk_tor(MSG* msg) {
+static void smd_io_mousex(MSG* msg)
+{
+	INPUT input;
+	memset(&input, 0, sizeof(input));
+	input.type = INPUT_MOUSE;
+	input.mi.mouseData = msg->wParam;
+	input.mi.dwFlags = MOUSEEVENTF_XDOWN;
+	SendInput(1, &input, sizeof(input));
+	Sleep(16);
+	input.mi.dwFlags = MOUSEEVENTF_XUP;
+	SendInput(1, &input, sizeof(input));
+}
+
+static void smd_io_mouse_scroll(MSG* msg)
+{
+	INPUT input;
+	memset(&input, 0, sizeof(input));
+	input.type = INPUT_MOUSE;
+	input.mi.mouseData = msg->lParam;
+	input.mi.dwFlags = msg->wParam ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL;
+	SendInput(1, &input, sizeof(input));
+	Sleep(16);
+}
+
+static void smd_io_chk_tor(MSG* msg)
+{
 	HWND hwnd = (HWND)msg->lParam;
-	if (!io.tor.exe) {
+	if (!io.tor.exe)
+	{
 		if (!hwnd || hwnd != GetAncestor(hwnd, GA_ROOT) || !IsWindowVisible(hwnd))
 			return;
 		char name[2048] = "";
@@ -347,43 +353,34 @@ static void smd_io_chk_tor(MSG* msg) {
 		io.tor.tid = tid;
 
 		smd_io_post_smd(SMD_MSG_HANDLE, SMD_HANDLE_TOR_WIN, (LPARAM)io.tor.win);
-		smd_io_init_scan();
+		smd_io_init_dll();
 	}
-	else {
+	else
+	{
 		DWORD active = 0;
 		GetExitCodeProcess(io.tor.exe, &active);
 		if (active == STILL_ACTIVE)
 			return;
 		smd_io_post_smd(SMD_MSG_HANDLE, SMD_HANDLE_TOR_WIN, 0);
-		io.tor.tid = 0;
-		smd_io_deinit_scan();
+		smd_io_deinit_dll();
 	}
 }
 
-static void smd_io_cfg(MSG* msg) {
-	WORD type = SMD_CFG_TYPE(msg->wParam);
-	WORD val = SMD_CFG_VAL(msg->wParam);
-
-	switch (type) {
-	case SMD_CFG_OPT:
-		if (val == SMD_OPT_NO_U)
-			smd_io_uno(msg->lParam);
-		break;
-	}
-}
-
-static void CALLBACK smd_io_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
+static void CALLBACK smd_io_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
+{
 	KillTimer(0, idEvent);
 	smd_io_post_smd(SMD_MSG_HANDLE, SMD_HANDLE_IO_TID, (LPARAM)GetCurrentThreadId());
 }
 
-static void smd_io_deinit() {
-	smd_io_deinit_scan();
+static void smd_io_deinit()
+{
+	smd_io_deinit_dll();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-DWORD WINAPI smd_io_run(LPVOID arg) {
+DWORD WINAPI smd_io_run(LPVOID arg)
+{
 	log_designate_thread("io");
 	log_line("Run...");
 
@@ -391,43 +388,42 @@ DWORD WINAPI smd_io_run(LPVOID arg) {
 	msg.wParam = 0;
 	memcpy(&io.smd, arg, sizeof(io.smd));
 
-	if (SetTimer(0, 0,  USER_TIMER_MINIMUM, smd_io_init)) {
-		while (GetMessageA(&msg, 0, 0, 0) > 0) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
+	if (SetTimer(0, 0,  USER_TIMER_MINIMUM, smd_io_init))
+	while (GetMessageA(&msg, 0, 0, 0) > 0)
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
 
-			switch (msg.message) {
-			case SMD_MSG_HANDLE:
-				smd_io_store_handle(&msg);
-				break;
-			case SMD_MSG_CFG:
-				smd_io_cfg(&msg);
-				break;
-			case SMD_MSG_CLICK:
-				smd_io_click(&msg);
-				smd_io_post_smd(SMD_MSG_CLICK, 0, 0);
-				break;
-			case SMD_MSG_CLICK_UI:
-				smd_io_click_tor((torui_e)msg.wParam);
-				smd_io_post_smd(SMD_MSG_CLICK_UI, 0, 0);
-				break;
-			case SMD_MSG_PRESS:
-				smd_io_press(&msg);
-				break;
-			case SMD_MSG_TOGGLE:
-				smd_io_toggle(&msg);
-				smd_io_post_smd(SMD_MSG_TOGGLE, 0, 0);
-				break;
-			case SMD_MSG_TOR_CHK:
-				smd_io_chk_tor(&msg);
-				break;
-			case SMD_MSG_SCAN:
-				smd_io_update_ui(&msg);
-				break;
-			case SMD_MSG_MID:
-				smd_io_mid();
-				break;
-			}
+		switch (msg.message) {
+		case SMD_MSG_HANDLE:
+			smd_io_store_handle(&msg);
+			break;
+		case SMD_MSG_CLICK:
+			smd_io_click(&msg);
+			smd_io_post_smd(SMD_MSG_CLICK, 0, 0);
+			break;
+		case SMD_MSG_PRESS:
+			smd_io_press(&msg);
+			break;
+		case SMD_MSG_MOD:
+			smd_io_mod(&msg);
+			break;
+		case SMD_MSG_TOGGLE:
+			smd_io_toggle(&msg);
+			smd_io_post_smd(SMD_MSG_TOGGLE, 0, 0);
+			break;
+		case SMD_MSG_TOR_CHK:
+			smd_io_chk_tor(&msg);
+			break;
+		case SMD_MSG_MID:
+			smd_io_mid();
+			break;
+		case SMD_MSG_MX:
+			smd_io_mousex(&msg);
+			break;
+		case SMD_MSG_SCROLL:
+			smd_io_mouse_scroll(&msg);
+			break;
 		}
 	}
 	smd_io_deinit();
