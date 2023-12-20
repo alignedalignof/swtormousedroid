@@ -7,7 +7,7 @@ Mouselook application with up to 28 click binds for Star Wars: The Old Republic.
 
 Download
 --------
-[zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip) [exe](swtormousedroid.exe)
+[zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip) [exe](https://github.com/alignedalignof/swtormousedroid/raw/master/swtormousedroid.exe)
 
 Usage
 -----
