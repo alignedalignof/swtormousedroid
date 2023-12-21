@@ -7,8 +7,8 @@ A *Star Wars: The Old Republic* mouselook application with configurable click bi
 
 Download
 --------
-[zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip)
-[exe](https://github.com/alignedalignof/swtormousedroid/raw/master/swtormousedroid5.exe)
+[zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/tags/5.0.1.zip)
+[exe](https://github.com/alignedalignof/swtormousedroid/raw/refs/tags/5.0.1/swtormousedroid5.exe)
 [source](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/dev.zip)
 
 Usage
