@@ -9,7 +9,7 @@ Download
 --------
 [zip](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip)
 [exe](https://github.com/alignedalignof/swtormousedroid/raw/master/swtormousedroid5.exe)
-[source](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/master.zip)
+[source](https://github.com/alignedalignof/swtormousedroid/archive/refs/heads/dev.zip)
 
 Usage
 -----
