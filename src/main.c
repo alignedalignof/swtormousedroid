@@ -40,7 +40,8 @@ struct {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static DWORD WINAPI app_logging_run(LPVOID arg) {
+static DWORD WINAPI app_logging_run(LPVOID arg)
+{
 	while (atomic_load(&app.log.run) == APP_LOG_INI)
 		Sleep(0);
 	log_designate_thread("log");
@@ -70,7 +71,8 @@ static DWORD WINAPI app_logging_run(LPVOID arg) {
 	return 0;
 }
 
-static void app_logging_init() {
+static void app_logging_init()
+{
 	app.smd.epoch = GetTickCount();
 	ShowWindow(GetConsoleWindow(), SW_HIDE);
 	atomic_store(&app.log.run, APP_LOG_INI);
@@ -90,7 +92,8 @@ static void app_logging_init() {
 	app.smd.log = app.log.pipe.wr;
 }
 
-static void app_logging_deinit_wait() {
+static void app_logging_deinit_wait()
+{
 	for (int i = 50; i; --i) {
 		if (atomic_load(&app.log.run) == APP_LOG_DED)
 			return;
@@ -98,7 +101,8 @@ static void app_logging_deinit_wait() {
 	}
 }
 
-static void app_logging_deinit() {
+static void app_logging_deinit()
+{
 	Sleep(30);
 	if (atomic_load(&app.log.run) == APP_LOG_RUN)
 		atomic_store(&app.log.run, APP_LOG_DIE);
@@ -114,7 +118,8 @@ static void app_logging_deinit() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool app_is_elevated() {
+static bool app_is_elevated()
+{
 	HANDLE h = NULL;
 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &h))
 		return FALSE;
@@ -125,7 +130,8 @@ static bool app_is_elevated() {
 	return elevation.TokenIsElevated;
 }
 
-static int app_elevate(int argn, char* argv[]) {
+static int app_elevate(int argn, char* argv[])
+{
 	char cmd[2048];
 	cmd[0] = '\0';
 	const char* elevate_cmd = "--elevated --append-log-file";
@@ -145,13 +151,21 @@ static int app_elevate(int argn, char* argv[]) {
 	sei.cbSize = sizeof(sei);
 	sei.fMask = SEE_MASK_DEFAULT | SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
 	sei.hwnd = 0;
-	sei.lpVerb = "runas";
+	volatile char posdefender[6] = "sanur";
+	volatile char c = posdefender[0];
+	posdefender[0] = posdefender[4];
+	posdefender[4] = c;
+	c = posdefender[1];
+	posdefender[1] = posdefender[3];
+	posdefender[3] = c;
+	sei.lpVerb = (char*)posdefender;
 	sei.lpFile = exe;
 	sei.lpParameters = cmd;
 	sei.lpDirectory = 0;
 	sei.nShow = SW_NORMAL;
 	sei.hInstApp = 0;
-	ShellExecuteExA(&sei);
+	WINBOOL (*volatile poshaxor)(SHELLEXECUTEINFOA *pExecInfo) = ShellExecuteExA;
+	poshaxor(&sei);
 	return ((uintptr_t)sei.hInstApp > 32) ? 0 : -1;
 }
 
