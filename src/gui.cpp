@@ -1044,11 +1044,14 @@ static void _gui_save_binds() {
 
 static void _gui_save_win()
 {
+	RECT r;
+	if (!IsWindowVisible(_gui.main)) return;
+	if (!GetWindowRect(_gui.main, &r)) return;
+	if (abs(r.top) > 10000 || abs(r.left) > 10000) return;
+
 	FILE* f = fopen("win.txt", "w");
 	if (f)
 	{
-		RECT r;
-		GetWindowRect(_gui.main, &r);
 		char win[256];
 		sprintf(win, "%i,%i,%i,%i\n", r.left, r.top, r.right - r.left, r.bottom - r.top);
 		fwrite(win, strlen(win), 1, f);
