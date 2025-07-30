@@ -74,7 +74,6 @@ static DWORD WINAPI app_logging_run(LPVOID arg)
 static void app_logging_init()
 {
 	app.smd.epoch = GetTickCount();
-	ShowWindow(GetConsoleWindow(), SW_HIDE);
 	atomic_store(&app.log.run, APP_LOG_INI);
 
 	app.log.pipe.rd = INVALID_HANDLE_VALUE;
@@ -86,7 +85,6 @@ static void app_logging_init()
 	}
 	else {
 		atomic_store(&app.log.run, APP_LOG_DED);
-		ShowWindow(GetConsoleWindow(), SW_SHOW);
 		printf("Log pump failed");
 	}
 	app.smd.log = app.log.pipe.wr;
@@ -219,6 +217,16 @@ int main(int argn, char* argv[])
 			app.smd.y = atoi(optarg);
 			break;
 		}
+	}
+
+	if (app.smd.secrets)
+	{
+		AllocConsole();
+		FILE* fp = NULL;
+		freopen_s(&fp, "CONIN$", "r", stdin);
+		freopen_s(&fp, "CONOUT$", "w", stdout);
+		freopen_s(&fp, "CONOUT$", "w", stderr);
+		ShowWindow(GetConsoleWindow(), SW_NORMAL);
 	}
 
 	app_logging_init();

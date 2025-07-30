@@ -61,6 +61,9 @@ typedef enum {
 	SMD_BIND_RMB_DBL_HLD,
 	SMD_BIND_LFT,
 	SMD_BIND_RGT,
+	SMD_BIND_MID_HLD,
+	SMD_BIND_MX1_HLD,
+	SMD_BIND_MX2_HLD,
 	SMD_BIND_CNT,
 } SmdBind;
 
@@ -69,6 +72,8 @@ typedef enum
 	SMD_LMB,
 	SMD_MMB,
 	SMD_RMB,
+	SMD_MX1,
+	SMD_MX2,
 	SMD_MB_CNT,
 } SmdMb;
 
@@ -109,7 +114,7 @@ typedef struct {
 } smd_cfg_t;
 
 
-int smd_run();
+int smd_run(const smd_cfg_t* smd_cfg);
 void smd_quit();
 DWORD WINAPI smd_io_run(LPVOID arg);
 DWORD WINAPI smd_gui_run(LPVOID arg);

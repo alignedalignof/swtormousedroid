@@ -10,6 +10,7 @@
 #include <gdiplus.h>
 #include <shlwapi.h>
 #include <chrono>
+#include <math.h>
 
 #include "gui.h"
 
@@ -17,13 +18,15 @@ using namespace Gdiplus;
 using namespace std;
 using namespace chrono;
 
-#define TIP_BIND L"Click to bind a key\nClick again to unbind"
+#define TIP_BIND L"Click to bind a key\nClick again to bind default\nClick-drag to unbind"
 #define TIP_CLICK TIP_BIND
 #define TIP_DCLICK TIP_BIND
 #define TIP_HOLD_CLICK L"Hold mouse button down\nWill only fire on release if modifiers are configured\n" TIP_BIND
 #define TIP_DHOLD_CLICK L"Double click-hold mouse button\n" TIP_BIND
 #define TIP_NOTCH L"Scroll one notch\n" TIP_BIND
 #define TIP_SCROLL TIP_BIND
+
+#define IDK 145
 
 struct {
 	DWORD tidio;
@@ -35,7 +38,7 @@ struct {
 	LRESULT area;
 	PrivateFontCollection* fonts;
 	FontFamily* fam;
-	uint8_t codes[SMD_BIND_CNT];
+	int32_t codes[SMD_BIND_CNT];
 	uint8_t mods[SMD_MB_CNT];
 	int key_toggle;
 	struct {
@@ -63,8 +66,9 @@ struct {
 		int left = CW_USEDEFAULT;
 		int top = CW_USEDEFAULT;
 		int width = 470;
-		int height = 860;
-		wchar_t title[50] = L"SWToR Mouse Droid";
+		int height = 930;
+		wchar_t title[50] = L"SWToR Mouse Droid 5.1";
+		int extended = 1;
 	} win;
 } static _gui;
 
@@ -237,7 +241,7 @@ static LRESULT CALLBACK _gui_main(HWND hwnd, UINT msg, WPARAM wPar, LPARAM lPar)
 	{
 		LPMINMAXINFO lpMMI = (LPMINMAXINFO)lPar;
 		lpMMI->ptMinTrackSize.x = 470;
-		lpMMI->ptMinTrackSize.y = 340;
+		lpMMI->ptMinTrackSize.y = 410 + (_gui.win.extended ? IDK : 0);
 		return 0;
 	}
 	case WM_NCCALCSIZE:
@@ -255,7 +259,7 @@ static LRESULT CALLBACK _gui_main(HWND hwnd, UINT msg, WPARAM wPar, LPARAM lPar)
 			if (w > bmp.bmWidth || h > bmp.bmHeight)
 			{
 				HDC hdc = GetDC(hwnd);
-				HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
+				HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h + IDK);
 				SelectObject(_gui.hdc, bmp);
 				DeleteObject(_gui.bmp);
 				_gui.bmp = bmp;
@@ -269,7 +273,7 @@ static LRESULT CALLBACK _gui_main(HWND hwnd, UINT msg, WPARAM wPar, LPARAM lPar)
 		PostQuitMessage(0);
 		return 0;
 	}
-	return DefWindowProc(hwnd, msg, wPar, lPar);
+	return DefWindowProcW(hwnd, msg, wPar, lPar);
 }
 
 struct TitledBox : virtual Node, Initee<TitledBox>
@@ -282,9 +286,9 @@ struct TitledBox : virtual Node, Initee<TitledBox>
 	void init()
 	{
 		Add(&outline);
-		Add(&title);
 		Add(&content);
-		outline.Box.Y = [this](){ return 0.63f*title.H(); };
+		Add(&title);
+		outline.Box.Y = [this](){ return 0.3f*title.H(); };
 		outline.Box.W = [this](){ return W(); };
 		outline.Box.H = [this](){ return H() - outline.Y(); };
 		content.Box.Y = [this](){ return title.H(); };
@@ -300,15 +304,37 @@ struct KeyBox : virtual Node, Initee<KeyBox>
 	TextBox Key;
 	RectGrad KeyBg;
 	Prop<int> ScanCode;
+	float click_x = NAN;
+	float click_y = NAN;
 
 	wchar_t _name[50];
 	virtual const wchar_t* _key_name()
 	{
-		return GetKeyNameTextW(ScanCode << 16, _name, sizeof(_name)/sizeof(*_name)) ? _name : NOT_BOUND;
+		return (ScanCode > 0 && GetKeyNameTextW(ScanCode << 16, _name, sizeof(_name)/sizeof(*_name))) ? _name : NOT_BOUND;
+	}
+
+	virtual void MouseMove(float x, float y, Node* top)
+	{
+		if (isnan(click_x) || isnan(click_y))
+		{
+			return;
+		}
+		if (gFocus ==  &KeyBg || gFocus == &Key)
+		{
+			if (fabsf(x - click_x) > 5 || fabsf(y - click_y) > 5)
+			{
+				click_x = NAN;
+				click_y = NAN;
+				ScanCode = -1;
+				Key.Txt = _key_name();
+			}
+		}
 	}
 
 	virtual void MouseLeftClick(float x, float y, Node* top)
 	{
+		click_x = NAN;
+		click_y = NAN;
 		if (top == &KeyBg || top == &Key)
 		{
 			if (Key.Txt == BINDING)
@@ -317,6 +343,8 @@ struct KeyBox : virtual Node, Initee<KeyBox>
 			}
 			else
 			{
+				click_x = x;
+				click_y = y;
 				Key.Txt = BINDING;
 			}
 		}
@@ -366,9 +394,12 @@ struct Bind : Initee<Bind, TitledBox>
 		constexpr static const wchar_t* const BWD = L"Scroll Backward";
 		constexpr static const wchar_t* const LFT = L"Scroll Left";
 		constexpr static const wchar_t* const RGT = L"Scroll Right";
+		constexpr static const wchar_t* const MID = L"Middle Click";
+		constexpr static const wchar_t* const MX1 = L"Mouse 4";
+		constexpr static const wchar_t* const MX2 = L"Mouse 5";
 		virtual const wchar_t* _key_name()
 		{
-			if (!ScanCode && binder)
+			if (ScanCode == 0 && binder)
 			{
 				SmdBind b = *binder;
 				if (b == SMD_BIND_FWD || b == SMD_BIND_FWD_DBL) return FWD;
@@ -379,9 +410,15 @@ struct Bind : Initee<Bind, TitledBox>
 					return LMB;
 				if (b == SMD_BIND_RMB || b == SMD_BIND_RMB_DBL || b == SMD_BIND_RMB_HLD || b == SMD_BIND_RMB_DBL_HLD)
 					return RMB;
+				if (b == SMD_BIND_MID_HLD)
+					return MID;
+				if (b == SMD_BIND_MX1_HLD)
+					return MX1;
+				if (b == SMD_BIND_MX2_HLD)
+					return MX2;
 				return NOT_BOUND;
 			}
-			return GetKeyNameTextW(ScanCode << 16, _name, sizeof(_name)/sizeof(*_name)) ? _name : NOT_BOUND;
+			return KeyBox::_key_name();
 		}
 
 	} key;
@@ -442,14 +479,14 @@ struct Bind : Initee<Bind, TitledBox>
 		outline.R = 3;
 		outline.Colors = {Color(0, 25, 85, 125), Color(255, 25, 85, 125), Color(66, 0, 6, 9), Color(0, 0, 6, 9)};
 		outline.Widths = { 0.66, 0.66, 5};
-		outline.Center = {0.85, 0.85};
+		outline.Center = {0.95, 0.15};
 
 		key.Description.Fam = _gui.fam;
 		key.Description.Size = 12;
 		key.Description.Txt = L"KEY BIND:";
 		key.Description.Color = Color(255, 243, 196, 66);
 		key.Box.X = 15.f;
-		key.Box.Y = 7.f;
+		key.Box.Y = 0;
 
 		key.Key <<= [](auto& _)
 		{
@@ -560,13 +597,13 @@ struct MouseLook : Initee<MouseLook, TitledBox>
 	Initer<MouseLook> initer = this;
 	void init()
 	{
-		mmb.Box = { .X = 15, .Y = 5 };
+		mmb.Box = { .X = 15, .Y = 0 };
 		mmb.Option.Description.Fam = _gui.fam;
 		mmb.Option.Description.Txt = L"Middle Click";
 		mmb.Option.Description.Color = Color(255, 169, 239, 245);
 		mmb.Option.Description.Size = 13;
 
-		key.Box = { .X = [this](){ return W()/2; }, .Y = 5 };
+		key.Box = { .X = [this](){ return W()/2; }, .Y = 0 };
 		key.Option.Description = mmb.Option.Description;
 		key.Option.Description.Txt = L"Key";
 		key.Option.Key.Fam = _gui.fam;
@@ -648,13 +685,15 @@ struct Radio : virtual Node, Initee<Radio>
 	}
 };
 
-struct Modifiers : Initee<Modifiers, TitledBox>
+struct Modifiers : Initee<Modifiers, RectGrad>
 {
+	TextBox name;
 	Radio shift;
 	Radio alt;
 	Radio ctrl;
 	SmdMb mouse = SMD_LMB;
 
+	virtual float H() { return ChildrenHeight(); }
 	virtual void MouseLeftClick(float x, float y, Node* top)
 	{
 		_gui.mods[mouse] = shift.Checked ? SMD_MOD_SHIFT : 0;
@@ -666,34 +705,39 @@ struct Modifiers : Initee<Modifiers, TitledBox>
 	{
 		if (_gui.binds[0].mod[mouse])
 		{
-			outline.Colors = {Color(0, 25, 85, 125), Color(255, 50, 255, 128), Color(192, 50, 255, 128), Color(32, 50, 255, 128)};
+			RectGrad::Draw(gfx);
 		}
-		else
-		{
-			outline.Colors = {Color(0, 25, 85, 125), Color(255, 25, 85, 125), Color(66, 0, 6, 9), Color(0, 0, 6, 9)};
-		}
-		TitledBox::Draw(gfx);
 	}
 
 	Initer<Modifiers> initer = this;
 	void init()
 	{
-		shift.Desc = ctrl.Desc = alt.Desc = title;
-		shift.Desc.Box.X = 40;
-		ctrl.Desc.Box.X = 40;
-		alt.Desc.Box.X = 40;
+		R = 3;
+		Colors = {Color(0, 25, 85, 125), Color(255, 50, 255, 128), Color(192, 50, 255, 128), Color(32, 50, 255, 128)};
+		Widths = { 0.66, 0.66, 5};
+		Center = {0.95, 0.15};
+		shift.Desc = ctrl.Desc = alt.Desc = name;
+		name.Color = Color(255, 243, 196, 66);
+		name.Box = { .X = 5, .Y = 5 };
+		shift.Desc.Box.X = 25;
+		ctrl.Desc.Box.X = 25;
+		alt.Desc.Box.X = 25;
+		shift.Desc.Box.Y = 3;
+		ctrl.Desc.Box.Y = 3;
+		alt.Desc.Box.Y = 3;
 		shift.Desc.Txt = L"Shift";
-		shift.Box = { .X = 15, .Y = 5 };
+		shift.Box = { .X = [this](){ return 0.28f*W();}, .Y = 3 };
 		alt.Desc.Txt = L"Alt";
-		alt.Box = { .X = 15, .Y = 35 };
+		alt.Box = { .X = [this](){ return 0.53f*W();}, .Y = 3 };
 		ctrl.Desc.Txt = L"Ctrl";
-		ctrl.Box = { .X = 15, .Y = 65 };
+		ctrl.Box = { .X = [this](){ return 0.78f*W();}, .Y = 3 };
 		shift.Checked = _gui.mods[mouse] & SMD_MOD_SHIFT;
 		alt.Checked = _gui.mods[mouse] & SMD_MOD_ALT;
 		ctrl.Checked = _gui.mods[mouse] & SMD_MOD_CTRL;
-		content.Add(&shift);
-		content.Add(&alt);
-		content.Add(&ctrl);
+		Add(&name);
+		Add(&shift);
+		Add(&alt);
+		Add(&ctrl);
 
 		const wchar_t* tip = L"Modifier applied while this mouse button is down\n"\
 								L"Modifier only applies to binds, middle click, Mouse 4 and 5\n"\
@@ -701,6 +745,79 @@ struct Modifiers : Initee<Modifiers, TitledBox>
 		shift.box.Tip = tip;
 		alt.box.Tip = tip;
 		ctrl.box.Tip = tip;
+	}
+};
+
+struct TabRect : Initee<TabRect, RectGrad>
+{
+	struct : PathGrad
+	{
+		Prop<int> L = 0;
+		virtual void Draw(Graphics* gdi)
+		{
+			std::shared_ptr<GraphicsPath> arrow = std::make_shared<GraphicsPath>();
+			if (_gui.win.extended)
+			{
+				PointF triangle[] = { PointF(0, L), PointF(2*L, L), PointF(L, 0) };
+				arrow->AddClosedCurve(triangle, 3);
+			}
+			else
+			{
+				PointF triangle[] = { PointF(0, 0), PointF(2*L, 0), PointF(L, L) };
+				arrow->AddClosedCurve(triangle, 3);
+			}
+			Path = arrow;
+			PathGrad::Draw(gdi);
+		}
+		virtual void MouseMove(float x, float y, Node* top)
+		{
+			if (top == this)
+			{
+				Colors = {Color(128, 0, 255, 255), Color(255, 172, 255, 255), Color(255, 172, 239, 255)};
+			}
+			else
+			{
+				Colors = {Color(0, 0, 255, 255), Color(255, 172, 239, 255), Color(255, 172, 239, 255)};
+			}
+		}
+		virtual void MouseLeftClick(float x, float y, Node* top)
+		{
+			if (top == this)
+			{
+				_gui.win.extended = !_gui.win.extended;
+				_gui.frame->Box.H = _gui.win.extended ? _gui.frame->H() + IDK : _gui.frame->H() - IDK;
+			}
+		}
+	} arrow;
+	virtual void Draw(Gdiplus::Graphics* gdi)
+	{
+		using namespace Gdiplus;
+		float w = 2*R;
+		float t = 2.5*R;
+		float width = W(), height = H();
+		if (width <= 0|| height <= 0 || width != width || height != height) return;
+		std::shared_ptr<GraphicsPath> rrect = std::make_shared<GraphicsPath>();
+		rrect->AddArc(0.0, 0.0, w, w, 180.0, 90.0);
+		rrect->AddArc(width/2 - 3*t, -t, t, t, 90, -30.0);
+		rrect->AddArc(width/2 - 2*t, -t, t, t, 240, 30.0);
+		rrect->AddArc(width/2 + 1*t, -t, t, t, 270, 30.0);
+		rrect->AddArc(width/2 + 2*t, -t, t, t, 120.0, -30.0);
+		rrect->AddArc(width - w, 0.0, w, w, 270.0, 90.0);
+		rrect->AddArc(width - w, height - w, w, w, 0.0, 90.0);
+		rrect->AddArc(0.0, height - w, w, w, 90.0, 90.0);
+		Path = rrect;
+		PathGrad::Draw(gdi);
+	}
+
+	Initer<TabRect> initer = this;
+	void init()
+	{
+		CollideOutside = true;
+		this->arrow.Colors = {Color(0, 0, 255, 255), Color(255, 172, 239, 255), Color(255, 172, 239, 255)};
+		this->arrow.Widths = {5, 1};
+		this->arrow.L = [this](){ return 2*R; };
+		this->arrow.Box = { .X = [this](){return (W() - arrow.W())/2;}, .Y = [this](){ return -arrow.H()/2;}};
+		Add(&this->arrow);
 	}
 };
 
@@ -821,11 +938,12 @@ static void _gui_graph(void)
 		_.hscroll <<= scrollers;
 	};
 
-	RectGrad* mods = new RectGrad(*binds);
-	mods->Box = { .X = [binds](){ return binds->X(); }, .Y = [binds, mods](){ return _gui.frame->H() - mods->H() - binds->X(); }, .W = [binds](){ return binds->W(); }, .H = 125 };
+	TabRect* mods = new TabRect;
+	mods->RectGrad::operator=(*binds);
+	mods->Box = { .X = [binds](){ return binds->X(); }, .Y = [binds, mods](){ return _gui.frame->H() - mods->H() - binds->X(); }, .W = [binds](){ return binds->W(); }, .H = [](){ return _gui.win.extended ? 175 : 30;} };
 
 	RectGrad* opts = new RectGrad(*binds);
-	opts->Box = { .X = [binds](){ return binds->X(); }, .Y = [binds, opts, mods](){ return mods->Y() - opts->H() - 15; }, .W = [binds](){ return binds->W(); }, .H = 70 };
+	opts->Box = { .X = [binds](){ return binds->X(); }, .Y = [binds, opts, mods](){ return mods->Y() - opts->H() - 15; }, .W = [binds](){ return binds->W(); }, .H = 65 };
 
 	binds->Box.H = [binds, opts](){ return opts->Y() - binds->Y() - 15; };
 	_gui.frame->Add(binds);
@@ -842,8 +960,8 @@ static void _gui_graph(void)
 	{
 		{{L"Left Click", TIP_CLICK, SMD_BIND_LMB}, {L"Left Double Click", TIP_DCLICK, SMD_BIND_LMB_DBL}, {L"Left Long Click", L"1337", SMD_BIND_LMB_PRS}, {L"Left Hold", TIP_HOLD_CLICK, SMD_BIND_LMB_HLD}, {L"Left Double Click Hold", TIP_DHOLD_CLICK, SMD_BIND_LMB_DBL_HLD}},
 		{{L"Right Click", TIP_CLICK, SMD_BIND_RMB}, {L"Right Double Click", TIP_DCLICK, SMD_BIND_RMB_DBL}, {L"Right Long Click", L"i think rickert is a pretty cool guy, eh slaps and doesnt afraid of anything", SMD_BIND_RMB_PRS}, {L"Right Hold", TIP_HOLD_CLICK, SMD_BIND_RMB_HLD}, {L"Right Double Click Hold", TIP_DHOLD_CLICK, SMD_BIND_RMB_DBL_HLD}},
-		{{L"Scroll Forward", TIP_SCROLL, SMD_BIND_FWD_DBL}, {L"Scroll Backward", TIP_SCROLL, SMD_BIND_BWD_DBL}, {L"Scroll Left", TIP_SCROLL, SMD_BIND_LFT}},
-		{{L"Notch Forward", TIP_NOTCH, SMD_BIND_FWD}, {L"Notch Backward", TIP_NOTCH, SMD_BIND_BWD}, {L"Scroll Right", TIP_SCROLL, SMD_BIND_RGT}},
+		{{L"Scroll Forward", TIP_SCROLL, SMD_BIND_FWD_DBL}, {L"Scroll Backward", TIP_SCROLL, SMD_BIND_BWD_DBL}, {L"Scroll Left", TIP_SCROLL, SMD_BIND_LFT}, {L"Mouse 4 Hold", TIP_HOLD_CLICK, SMD_BIND_MX1_HLD}, {L"Middle Hold", TIP_HOLD_CLICK, SMD_BIND_MID_HLD}},
+		{{L"Notch Forward", TIP_NOTCH, SMD_BIND_FWD}, {L"Notch Backward", TIP_NOTCH, SMD_BIND_BWD}, {L"Scroll Right", TIP_SCROLL, SMD_BIND_RGT}, {L"Mouse 5 Hold", TIP_HOLD_CLICK, SMD_BIND_MX2_HLD}},
 	};
 
 	for (int mouse = 0; mouse < 4; mouse++)
@@ -897,10 +1015,10 @@ static void _gui_graph(void)
 		};
 		auto Y = [binds, bind, mouse, action]()
 		{
-			float ofs = (mouse >= 2 && binds->W() < 2.5*bind->W()) ? 375 : 0;
-			return 5 + ofs + action*70.f;
+			float ofs = (mouse >= 2 && binds->W() < 2.5*bind->W()) ? 315 : 0;
+			return 5 + ofs + action*60.f;
 		};
-		bind->Box = { .X = X, .Y = Y, .W = 210, .H = 65 };
+		bind->Box = { .X = X, .Y = Y, .W = 210, .H = 55 };
 		binds->Add(bind);
 	}
 
@@ -913,7 +1031,7 @@ static void _gui_graph(void)
 	ml->outline.R = 3;
 	ml->outline.Colors = {Color(0, 25, 85, 125), Color(255, 25, 85, 125), Color(66, 0, 6, 9), Color(0, 0, 6, 9)};
 	ml->outline.Widths = { 0.66, 0.66, 5};
-	ml->outline.Center = {0.85, 0.85};
+	ml->outline.Center = {0.95, 0.15};
 	ml->Box = { .X = 10, .Y = 5, .W = [opts](){ return opts->W() - 20;}, .H = [opts](){ return opts->H() - 10;} };
 
 	auto fyi = new TextBox;
@@ -928,26 +1046,59 @@ static void _gui_graph(void)
 
 	opts->Add(ml);
 
-	Modifiers lmb, mmb, rmb;
+	struct : public TitledBox
+	{
+		virtual void Draw(Gdiplus::Graphics* gdi)
+		{
+			TitledBox::Draw(gdi);
+			Clip = make_shared<GraphicsPath>();
+			Clip->AddRectangle(RectF(0.0, 0.0, W(), H()));
+		}
+	} *modifiers = new std::remove_pointer<decltype(modifiers)>::type;
+
+	modifiers->title.Fam = _gui.fam;
+	modifiers->title.Txt = L"Modifiers";
+	modifiers->title.Color = Color(255, 169, 239, 245);
+	modifiers->title.Size = 14;
+	modifiers->title.Box.X = 10.f;
+	modifiers->outline.R = 3;
+	modifiers->outline.Colors = {Color(0, 25, 85, 125), Color(255, 25, 85, 125), Color(66, 0, 6, 9), Color(0, 0, 6, 9)};
+	modifiers->outline.Widths = { 0.66, 0.66, 5};
+	modifiers->outline.Center = {0.95, 0.15};
+	modifiers->Box = { .X = 10, .Y = 5, .W = [mods](){ return mods->W() - 20;}, .H = [mods](){ return mods->H() - 10;} };
+	mods->Add(modifiers);
+
+	Modifiers lmb, mmb, rmb, m4, m5;
 
 	lmb.mouse = SMD_LMB;
-	lmb.title = ml->title;
-	lmb.outline = ml->outline;
-	lmb.title.Txt = L"LMB modifiers";
-	lmb.Box = { .X = [](){ return 10; }, .Y = 5, .W = 130, .H = [mods](){ return mods->H() - 5; } };
-	mods->Add(new auto(lmb));
+	lmb.name = modifiers->title;
+	lmb.name.Txt = L"Left Hold:";
+	lmb.Box = { .X = 10, .Y = -5, .W = [modifiers](){ return modifiers->W() - 10;} };
+	modifiers->content.Add(new auto(lmb));
 
 	mmb = lmb;
 	mmb.mouse = SMD_MMB;
-	mmb.title.Txt = L"MMB modifiers";
-	mmb.Box.X = [mods](){ return 0.33f*mods->W(); };
-	mods->Add(new auto(mmb));
+	mmb.name.Txt = L"Middle Hold:";
+	mmb.Box.Y = 28 - 5;
+	modifiers->content.Add(new auto(mmb));
 
 	rmb = lmb;
 	rmb.mouse = SMD_RMB;
-	rmb.title.Txt = L"RMB modifiers";
-	rmb.Box.X = [mods](){ return 0.66f*mods->W(); };
-	mods->Add(new auto(rmb));
+	rmb.name.Txt = L"Right Hold:";
+	rmb.Box.Y = 2*28 - 5;
+	modifiers->content.Add(new auto(rmb));
+
+	m4 = lmb;
+	m4.mouse = SMD_MX1;
+	m4.name.Txt = L"Mouse 4 Hold:";
+	m4.Box.Y = 3*28 - 5;
+	modifiers->content.Add(new auto(m4));
+
+	m5 = lmb;
+	m5.mouse = SMD_MX2;
+	m5.name.Txt = L"Mouse 5 Hold:";
+	m5.Box.Y = 4*28 - 5;
+	modifiers->content.Add(new auto(m5));
 }
 
 static void _gui_load_win()
@@ -957,22 +1108,19 @@ static void _gui_load_win()
 	{
 		char win[256];
 		fgets(win, sizeof(win), f);
-		sscanf(win, "%i,%i,%i,%i", &_gui.win.left, &_gui.win.top, &_gui.win.width, &_gui.win.height);
+		sscanf(win, "%i,%i,%i,%i,%i", &_gui.win.left, &_gui.win.top, &_gui.win.width, &_gui.win.height, &_gui.win.extended);
 		fgets(win, sizeof(win), f);
-		int i = 0;
-		for (; win[i] && win[i] != '\n' && i < sizeof(_gui.win.title)/sizeof(_gui.win.title[0]) - 1; i++)
-			_gui.win.title[i] = win[i];
-		_gui.win.title[i] = 0;
+		MultiByteToWideChar(CP_UTF8, 0, win, strlen(win), _gui.win.title, sizeof(_gui.win.title)/sizeof(_gui.win.title[0]));
 		fclose(f);
 	}
 }
 
-#define GUI_FILE "smd5.cfg"
-#define GUI_MAGIC 0xdaedc1d3U
+#define GUI_FILE "smd51.cfg"
+#define GUI_MAGIC 0xdaedc1d4U
 
 typedef struct  __attribute__((packed)) { //same PC only
 	uint32_t magic;
-	uint8_t codes[SMD_BIND_CNT];
+	int32_t codes[SMD_BIND_CNT];
 	uint8_t mods[SMD_MB_CNT];
 	int key_toggle;
 } GuiBin;
@@ -990,11 +1138,13 @@ static void _gui_load_binds()
 	_gui.codes[SMD_BIND_RMB_DBL] = '7';
 	_gui.codes[SMD_BIND_RMB_DBL_HLD] = '8';
 
-	_gui.codes[SMD_BIND_LFT] = 'X';
-	_gui.codes[SMD_BIND_RGT] = 'D';
+	_gui.codes[SMD_BIND_LFT] = 'Q';
+	_gui.codes[SMD_BIND_RGT] = 'E';
 
-	_gui.mods[SMD_MMB] = SMD_MOD_SHIFT | SMD_MOD_CTRL;
+	_gui.codes[SMD_BIND_MX1_HLD] = 'X';
+
 	_gui.mods[SMD_RMB] = SMD_MOD_SHIFT;
+	_gui.mods[SMD_MX2] = SMD_MOD_SHIFT | SMD_MOD_CTRL;
 
 	_gui.key_toggle =  MapVirtualKeyA(VK_SHIFT, MAPVK_VK_TO_VSC);
 	for (int bind = 0; bind < SMD_BIND_CNT; bind++)
@@ -1053,10 +1203,10 @@ static void _gui_save_win()
 	if (f)
 	{
 		char win[256];
-		sprintf(win, "%i,%i,%i,%i\n", r.left, r.top, r.right - r.left, r.bottom - r.top);
+		sprintf(win, "%i,%i,%i,%i,%i\n", r.left, r.top, r.right - r.left, r.bottom - r.top, _gui.win.extended);
 		fwrite(win, strlen(win), 1, f);
-		for (int i = 0; _gui.win.title[i] && i < sizeof(_gui.win.title)/sizeof(_gui.win.title[0]) - 1; i++)
-			fputc(_gui.win.title[i], f);
+		WideCharToMultiByte(CP_UTF8, 0, _gui.win.title, wcslen(_gui.win.title), win, sizeof(win), NULL, NULL);
+		fwrite(win, strlen(win), 1, f);
 		fputc('\n', f);
 		const char* fyi = "Delete this file if the window is not showing";
 		fwrite(fyi, strlen(fyi), 1, f);
@@ -1081,22 +1231,22 @@ static void CALLBACK _gui_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwT
 	_gui.fonts->GetFamilies(1, &fam, &found);
 	_gui.fam = fam.Clone();
 
-	WNDCLASS wclass;
+	WNDCLASSW wclass;
 	memset(&wclass, 0, sizeof(wclass));
 	wclass.lpfnWndProc = _gui_main;
-	wclass.hInstance = GetModuleHandle(0);
-	wclass.lpszClassName = "gui";
+	wclass.hInstance = GetModuleHandleA(0);
+	wclass.lpszClassName = L"gui";
 	wclass.hCursor = LoadCursor(0, IDC_ARROW);
 	wclass.style = CS_OWNDC;
-	RegisterClass(&wclass);
+	RegisterClassW(&wclass);
 
-	_gui.main = CreateWindowEx(WS_EX_LAYERED, wclass.lpszClassName, "SWToR Mouse Droid 5", WS_POPUP | WS_VISIBLE,
+	_gui.main = CreateWindowExW(WS_EX_LAYERED, wclass.lpszClassName, _gui.win.title, WS_POPUP | WS_VISIBLE,
 		_gui.win.left, _gui.win.top, _gui.win.width,_gui.win.width,
 		0, 0, wclass.hInstance, 0);
 
 	HDC hdc = GetDC(_gui.main);
 	_gui.hdc = CreateCompatibleDC(hdc);
-	_gui.bmp = CreateCompatibleBitmap(hdc, _gui.win.width, _gui.win.height);
+	_gui.bmp = CreateCompatibleBitmap(hdc, _gui.win.width, _gui.win.height + IDK);
 	SelectObject(_gui.hdc, _gui.bmp);
 	_gui_graph();
 
@@ -1113,8 +1263,7 @@ static void CALLBACK _gui_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwT
 		pStream->Release();
 	}
 
-	if (_gui.smd.secrets) ShowWindow(GetConsoleWindow(), SW_SHOW);
-	ShowWindow(_gui.main, SW_SHOW);
+	ShowWindow(_gui.main, SW_NORMAL);
 	smd_gui_cntx_spawn(_gui.main, _gui.fam);
 	_gui_post_smd(SMD_MSG_HANDLE, SMD_HANDLE_GUI_WIN, (LPARAM)_gui.main);
 }
@@ -1194,6 +1343,8 @@ DWORD WINAPI smd_gui_run(LPVOID arg) {
 			_gui.binds[0].mod[0] = (msg.wParam >> 8) & 0xff;
 			_gui.binds[0].mod[1] = (msg.wParam >> 16) & 0xff;
 			_gui.binds[0].mod[2] = (msg.wParam >> 24) & 0xff;
+			_gui.binds[0].mod[3] = (msg.wParam >> 32) & 0xff;
+			_gui.binds[0].mod[4] = (msg.wParam >> 40) & 0xff;
 			break;
 		case SMD_MSG_CROSS:
 			_gui.test.x = (int16_t)msg.lParam;
@@ -1202,7 +1353,7 @@ DWORD WINAPI smd_gui_run(LPVOID arg) {
 			_gui_request_tip(nullptr);
 			break;
 		}
-		bool app =  msg.message >= SMD_MSG_BIND || msg.message == SMD_MSG_CROSS;
+		bool app = msg.message >= SMD_MSG_BIND || msg.message == SMD_MSG_CROSS;
 		bool scroll = msg.message == WM_MOUSEWHEEL || msg.message == WM_MOUSEHWHEEL;
 		if (_gui.test.target != _gui.main || app || scroll)
 		{

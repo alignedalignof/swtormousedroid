@@ -30,12 +30,12 @@ struct smd {
 		trigger_t lmb;
 		trigger_t mmb;
 		trigger_t rmb;
+		trigger_t mx1;
+		trigger_t mx2;
 		trigger_t fwd;
 		trigger_t bwd;
 		trigger_t rgt;
 		trigger_t lft;
-		trigger_t mx1;
-		trigger_t mx2;
 		trigger_t key;
 		trigger_t clk;
 	} trigger;
@@ -110,14 +110,14 @@ static void smd_rmb_pressed() { smd_trigger(SMD_BIND_RMB_PRS); }
 
 static void smd_trigger_reset_binds()
 {
-	for (trigger_t* t = (trigger_t*)&smd.trigger; t <= &smd.trigger.mx2; ++t)
+	for (trigger_t* t = (trigger_t*)&smd.trigger; t <= &smd.trigger.lft; ++t)
 	if (t != &smd.trigger.mmb)
 		trigger_reset(t);
 	smd_post_io(SMD_MSG_MOD, 7, 0);
 	memset(&smd.modder, 0, sizeof(smd.modder));
 	memset(&smd.modee, 0, sizeof(smd.modee));
-	smd.trigger.lmb.cb.press = smd_gui_bind_code(SMD_BIND_LMB_PRS) ? smd_lmb_pressed : NULL;
-	smd.trigger.rmb.cb.press = smd_gui_bind_code(SMD_BIND_RMB_PRS) ? smd_rmb_pressed : NULL;
+	smd.trigger.lmb.cb.press = (smd_gui_bind_code(SMD_BIND_LMB_PRS) > 0) ? smd_lmb_pressed : NULL;
+	smd.trigger.rmb.cb.press = (smd_gui_bind_code(SMD_BIND_RMB_PRS) > 0) ? smd_rmb_pressed : NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -225,7 +225,7 @@ static void smd_trigger_press(trigger_t* t)
 {
 	int mb = t - &smd.trigger.lmb;
 	trigger_press(t);
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < SMD_MB_CNT; i++)
 	{
 		if (i != mb)
 		if (trigger_is_held(&smd.trigger.lmb + i))
@@ -240,7 +240,7 @@ static void smd_trigger_release(trigger_t* t)
 {
 	int mb = t - &smd.trigger.lmb;
 	trigger_release(t);
-	if (mb < 3 && smd.modder[mb])
+	if (mb < SMD_MB_CNT && smd.modder[mb])
 	{
 		smd.modder[mb] = 0;
 		trigger_reset(t);
@@ -313,13 +313,13 @@ static LRESULT CALLBACK smd_mouse_hook(int nCode, WPARAM wParam, LPARAM lParam) 
 		return !0;
 	}
 	case WM_XBUTTONDOWN:
+	case WM_XBUTTONUP:
 	{
 		int btn = GET_XBUTTON_WPARAM(mouse.mouseData);
 		trigger_t* mx = (btn == XBUTTON1) ? &smd.trigger.mx1 : (btn == XBUTTON2) ? &smd.trigger.mx2 : NULL;
 		if (!mx) break;
 
-		smd_trigger_press(mx);
-		smd_trigger_release(mx);
+		(wParam == WM_XBUTTONDOWN) ? smd_trigger_press(mx) : smd_trigger_release(mx);
 		return !0;
 	}
 	}
@@ -371,6 +371,8 @@ static void CALLBACK smd_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 
 	trigger_reset(&smd.trigger.mmb);
 	smd.trigger.mmb.window.tap = smd.cfg.delay;
+	smd.trigger.mmb.window.repeat = 2*smd.cfg.delay;
+
 	smd.trigger.fwd.window.dtap = 0.75*smd.cfg.delay;
 	smd.trigger.bwd.window.dtap = 0.75*smd.cfg.delay;
 	smd.trigger.lft.window.dtap = 0.75*smd.cfg.delay;
@@ -385,6 +387,12 @@ static void CALLBACK smd_init(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 	smd.trigger.rmb.window.press = (116*smd.cfg.delay)/200;
 	smd.trigger.rmb.window.dtap = smd.cfg.delay;
 	smd.trigger.rmb.window.repeat = 2*smd.cfg.delay;
+
+	smd.trigger.mx1.window.tap = smd.cfg.delay;
+	smd.trigger.mx1.window.repeat = 2*smd.cfg.delay;
+
+	smd.trigger.mx2.window.tap = smd.cfg.delay;
+	smd.trigger.mx2.window.repeat = 2*smd.cfg.delay;
 
 	smd.trigger.key.window.tap = smd.cfg.delay;
 	smd.trigger.clk.window.tap = smd.cfg.delay;
@@ -405,14 +413,14 @@ static void smd_deinit() {
 		Sleep(10);
 		DWORD ret = 0;
 		if (smd.handle.hio)
-			if (GetExitCodeThread(smd.handle.hio, &ret))
-				if (ret == STILL_ACTIVE)
-					continue;
+		if (GetExitCodeThread(smd.handle.hio, &ret))
+		if (ret == STILL_ACTIVE)
+			continue;
 		ret = 0;
 		if (smd.handle.hui)
-			if (GetExitCodeThread(smd.handle.hui, &ret))
-				if (ret == STILL_ACTIVE)
-					continue;
+		if (GetExitCodeThread(smd.handle.hui, &ret))
+		if (ret == STILL_ACTIVE)
+			continue;
 		break;
 	}
 	if (smd.hook.mouse)
@@ -474,16 +482,21 @@ static void smd_click(int btns)
 
 static void smd_press_btn(SmdBind b, bool mid, int mx, WPARAM allmods)
 {
-	WPARAM mods = ((allmods >> 16) & 0xff)  | ((allmods >> 8) & 0xff) | (allmods & 0xff);
+	WPARAM mods = ((allmods >> 32) & 0xff) | ((allmods >> 24) & 0xff) | ((allmods >> 16) & 0xff)  | ((allmods >> 8) & 0xff) | (allmods & 0xff);
 	allmods <<= 8;
-	if (smd.cfg.secrets) log_line("FIRE b %i %u %i %x", b, mid, mx, mods);
-	if (mid)
+
+	bool mid_hold_mid = (b == SMD_BIND_MID_HLD) && !smd_gui_bind_code(SMD_BIND_MID_HLD);
+	bool mx1_hold_mx1 = (b == SMD_BIND_MX1_HLD) && !smd_gui_bind_code(SMD_BIND_MX1_HLD);
+	bool mx2_hold_mx2 = (b == SMD_BIND_MX2_HLD) && !smd_gui_bind_code(SMD_BIND_MX2_HLD);
+	mx |= mx1_hold_mx1 ? XBUTTON1 : 0;
+	mx |= mx2_hold_mx2 ? XBUTTON2 : 0;
+	if (mid || mid_hold_mid)
 	{
 		smd_post_io(SMD_MSG_MOD, 8 | mods, 0);
 		smd_post_io(SMD_MSG_MID, 0, 0);
 		smd_post_io(SMD_MSG_MID, 0, 0);
 		smd_post_io(SMD_MSG_MOD, mods, 0);
-		smd_post_gui(SMD_MSG_BIND, allmods | SMD_BIND_CNT, 0);
+		smd_post_gui(SMD_MSG_BIND, allmods | b, 0);
 	}
 	else if (mx)
 	{
@@ -491,24 +504,33 @@ static void smd_press_btn(SmdBind b, bool mid, int mx, WPARAM allmods)
 		smd_post_io(SMD_MSG_MX, mx, 0);
 		smd_post_io(SMD_MSG_MX, mx, 0);
 		smd_post_io(SMD_MSG_MOD, mods, 0);
-		smd_post_gui(SMD_MSG_BIND, allmods | SMD_BIND_CNT, 0);
+		smd_post_gui(SMD_MSG_BIND, allmods | b, 0);
 	}
 	else
 	{
 		int code = smd_gui_bind_code(b);
+		if (code < 0)
+		{
+			smd_post_gui(SMD_MSG_BIND, allmods | b, 0);
+			return;
+		}
 		if (!code)
 		{
-			smd_post_gui(SMD_MSG_BIND, b, 0);
+			smd_post_gui(SMD_MSG_BIND, allmods | b, 0);
 			if (b >= SMD_BIND_FWD && b <= SMD_BIND_BWD_DBL) smd_post_io(SMD_MSG_SCROLL, 0, smd.last_scroll);
 			if (b == SMD_BIND_LFT || b == SMD_BIND_RGT) smd_post_io(SMD_MSG_SCROLL, 1, smd.last_scroll);
 
 			if (b == SMD_BIND_LMB || b == SMD_BIND_LMB_DBL) smd_click(1);
 			if (b == SMD_BIND_RMB || b == SMD_BIND_RMB_DBL) smd_click(2);
 
-			if (smd.trigger.lmb.state == TRIGGER_ONCE || smd.trigger.lmb.state == TRIGGER_TWICE)
+			if (smd.trigger.lmb.state == TRIGGER_ONCE ||
+				smd.trigger.lmb.state == TRIGGER_TWICE ||
+				(smd.trigger.lmb.state == TRIGGER_IDLE && smd_gui_is_hold_click_delayed(SMD_LMB)))
 			if (b == SMD_BIND_LMB_HLD || b == SMD_BIND_LMB_DBL_HLD)
 				smd_click(1);
-			if (smd.trigger.rmb.state == TRIGGER_ONCE || smd.trigger.rmb.state == TRIGGER_TWICE)
+			if (smd.trigger.rmb.state == TRIGGER_ONCE ||
+				smd.trigger.rmb.state == TRIGGER_TWICE ||
+				(smd.trigger.rmb.state == TRIGGER_IDLE && smd_gui_is_hold_click_delayed(SMD_RMB)))
 			if (b == SMD_BIND_RMB_HLD || b == SMD_BIND_RMB_DBL_HLD)
 				smd_click(2);
 			return;
@@ -525,26 +547,26 @@ static void smd_trigger_ex(SmdBind b, bool mid, int mx)
 {
 	trigger_t* modee = NULL;
 	if (b >= SMD_BIND_LMB && b <= SMD_BIND_LMB_DBL_HLD) modee = &smd.trigger.lmb;
-	if (mid) modee = &smd.trigger.mmb;
+	if (mid || b == SMD_BIND_MID_HLD) modee = &smd.trigger.mmb;
 	if (b >= SMD_BIND_RMB && b <= SMD_BIND_RMB_DBL_HLD) modee = &smd.trigger.rmb;
 	if (b == SMD_BIND_FWD || b == SMD_BIND_FWD_DBL) modee = &smd.trigger.fwd;
 	if (b == SMD_BIND_BWD || b == SMD_BIND_BWD_DBL) modee = &smd.trigger.bwd;
 	if (b == SMD_BIND_LFT) modee = &smd.trigger.lft;
 	if (b == SMD_BIND_RGT) modee = &smd.trigger.rgt;
-	if (mx == XBUTTON1) modee = &smd.trigger.mx1;
-	if (mx == XBUTTON2) modee = &smd.trigger.mx2;
+	if (mx == XBUTTON1 || b == SMD_BIND_MX1_HLD) modee = &smd.trigger.mx1;
+	if (mx == XBUTTON2 || b == SMD_BIND_MX2_HLD) modee = &smd.trigger.mx2;
 	if (!modee) return; //how pathetic
 
 	int i = modee - &smd.trigger.lmb;
-	bool siuuu = (b == SMD_BIND_LMB_HLD || b == SMD_BIND_RMB_HLD) && !smd_gui_bind_code(b);
 	if (i < SMD_MB_CNT)
-	if (smd.modder[i] || (!siuuu && (modee->state == TRIGGER_HOLD || modee->state == TRIGGER_ONCE) && smd_gui_is_hold_click_delayed((SmdMb)i)))
+	if (smd.modder[i] || ((modee->state == TRIGGER_HOLD || modee->state == TRIGGER_ONCE) && smd_gui_is_hold_click_delayed((SmdMb)i)))
 	{
 		return;
 	}
 	bool dbl = b == SMD_BIND_FWD_DBL || b == SMD_BIND_BWD_DBL || b == SMD_BIND_LMB_DBL || b == SMD_BIND_RMB_DBL;
+	if (smd.cfg.secrets) log_line("trigger %i %i %i, %u %i, %01x | %01x | %01x | %01x | %01x", b, i, modee->state, mid, mx,
+			(smd.modee[i] >> 32) & 0xff, (smd.modee[i] >> 24) & 0xff, (smd.modee[i] >> 16) & 0xff, (smd.modee[i] >> 8) & 0xff, smd.modee[i] & 0xff);
 	if (!dbl || modee->state != TRIGGER_IDLE) smd_press_btn(b, mid, mx, smd.modee[i]);
-	if (smd.cfg.secrets) log_line("trigger %i %i", i, modee->state);
 	if (modee->state == TRIGGER_IDLE) smd.modee[i] = 0;
 }
 
@@ -591,8 +613,16 @@ static void smd_mx1_once() {
 	smd_trigger_ex(SMD_BIND_CNT, false, XBUTTON1);
 }
 
+static void smd_mx1_hold() {
+	smd_trigger(SMD_BIND_MX1_HLD);
+}
+
 static void smd_mx2_once() {
 	smd_trigger_ex(SMD_BIND_CNT, false, XBUTTON2);
+}
+
+static void smd_mx2_hold() {
+	smd_trigger(SMD_BIND_MX2_HLD);
 }
 
 static void smd_lmb_once() {
@@ -641,7 +671,7 @@ static void smd_mid_tap()
 
 static void smd_mid_hold()
 {
-	smd_mid_click();
+	smd_trigger(SMD_BIND_MID_HLD);
 }
 
 static void smd_key_toggle()
@@ -703,11 +733,13 @@ struct smd static smd = {
 		.mx1 = {
 			.cb = {
 				.tap = smd_mx1_once,
+				.hold = smd_mx1_hold,
 			},
 		},
 		.mx2 = {
 			.cb = {
 				.tap = smd_mx2_once,
+				.hold = smd_mx2_hold,
 			},
 		},
 		.key = {

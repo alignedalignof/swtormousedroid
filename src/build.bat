@@ -1,8 +1,8 @@
-SET APP=..\swtormousedroid5.exe
+SET APP=..\swtormousedroid51.exe
 SET DLL=rc\smd5.bin
 SET MH=minhook-master\src
-SET CFLAGS=-march=x86-64 -O3 -s
-SET CROSS=C:\mingw-w64\x86_64-13.2.0-release-win32-seh-msvcrt-rt_v11-rev1\mingw64\bin\
+SET CFLAGS=-march=x86-64 -O3 -s -mwindows
+SET CROSS=C:\x86_64-15.2.0-release-win32-seh-msvcrt-rt_v13-rev0\mingw64\bin\
 SET GCC=%CROSS%gcc
 SET G++=%CROSS%g++
 

@@ -136,6 +136,8 @@ struct Node
 	{
 		Prop<float> X, Y, W = NAN, H = NAN;
 	} Box;
+	bool CollideOutside = false;
+
 	Node* _parent;
 	std::unordered_map<Node*, Link> _children;
 	std::shared_ptr<Gdiplus::GraphicsPath> Clip;
@@ -484,13 +486,15 @@ inline static Node* Top(Node* node, float x, float y)
 {
 	float w =  node->W(), h =  node->H();
 	bool inside = w != w || h != h || (x >= 0 && y >= 0 && x < w && y < h);
-	if (!inside) return nullptr;
+	if (!inside)
+	if (!node->CollideOutside)
+		return nullptr;
 	for (Node* child = node->Prev(0); child; child = node->Prev(child))
 	{
 		Node* hit = Top(child, x - child->X(), y - child->Y());
 		if (hit) return hit;
 	}
-	return (w == w && h == h) ? node : nullptr;
+	return (inside && w == w && h == h) ? node : nullptr;
 }
 
 inline static void MouseMove(Node* root, float x, float y, Node* top)
