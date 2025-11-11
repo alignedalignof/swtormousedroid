@@ -3,7 +3,7 @@ SWToR Mouse Droid
 
 Description
 -----------
-A *Star Wars: The Old Republic* mouselook application with configurable click binds
+A *Star Wars: The Old Republic* mouselook application for a more action oriented gameplay
 
 Download
 --------
